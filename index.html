@@ -119,7 +119,7 @@
 </head>
 <body>
 <div id="stage">
-  <video id="inputVideo" playsinline></video>
+  <video id="inputVideo" playsinline muted autoplay webkit-playsinline="true"></video>
 
   <div id="startOverlay">
     <h1>Cat's <span>Cradle</span></h1>
@@ -204,12 +204,19 @@ async function initHandTracking(){
   });
   hands.onResults(onResults);
 
+  videoEl.muted = true;
+  videoEl.setAttribute('muted', '');
+  videoEl.setAttribute('playsinline', '');
+
   camera = new Camera(videoEl, {
     onFrame: async () => { await hands.send({image: videoEl}); },
     width: 960,
     height: 720
   });
   await camera.start();
+
+  // some mobile browsers need an explicit play() nudge even after getUserMedia succeeds
+  try { await videoEl.play(); } catch(e) { console.warn('video.play() nudge failed:', e); }
 }
 
 document.getElementById('startBtn').addEventListener('click', async () => {
@@ -336,17 +343,26 @@ function drawIdleGrid(){
 }
 
 function drawVideoBackground(){
-  push();
-  translate(width, 0);
-  scale(-1,1);
-  if(videoEl.readyState >= 2){
+  if(videoEl.readyState >= 2 && videoEl.videoWidth > 0){
+    push();
+    translate(width, 0);
+    scale(-1,1);
     image(videoEl, 0, 0, width, height);
+    pop();
+    // dark neon tint over the video for the futuristic look
+    noStroke();
+    fill(3,6,12,110);
+    rect(0,0,width,height);
+  } else {
+    drawIdleGrid();
+    push();
+    noStroke();
+    fill(23,247,224,220);
+    textAlign(CENTER, CENTER);
+    textSize(13);
+    text('WAITING FOR CAMERA STREAM…', width/2, height/2);
+    pop();
   }
-  pop();
-  // dark neon tint over the video for the futuristic look
-  noStroke();
-  fill(3,6,12,110);
-  rect(0,0,width,height);
 }
 
 function drawHandSkeleton(pts){
