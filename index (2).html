@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Bio-Loom // Hand Weave</title>
+<style>
+  :root{
+    --abyss: #020608;
+    --teal: #00ffc8;
+    --coral: #ff4f81;
+    --amber: #ffb400;
+    --foam: #eafffa;
+  }
+  html, body{
+    margin:0; padding:0; width:100%; height:100%;
+    background: var(--abyss);
+    overflow:hidden;
+    font-family: 'Courier New', Consolas, monospace;
+  }
+  #stage{ position:relative; width:100vw; height:100vh; }
+
+  /* IMPORTANT FIX: the camera <video> is kept opacity:0 (still in the render
+     tree, still decoding frames) rather than display:none. On several mobile
+     Chromium builds, display:none video elements stop decoding frames
+     entirely as a power-saving measure -- readyState/videoWidth can still
+     report as valid, but drawImage()/canvas reads return black. opacity:0
+     keeps the decode pipeline alive while remaining invisible to the user. */
+  video{
+    position:absolute; top:0; left:0;
+    width:100%; height:100%;
+    object-fit:cover;
+    opacity:0;
+    pointer-events:none;
+    z-index:0;
+  }
+  video.rawPreview{ opacity:1; z-index:3; }
+
+  canvas{ position:absolute; top:0; left:0; display:block; z-index:1; }
+  canvas.hiddenForRaw{ opacity:0; }
+
+  #hud{
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    pointer-events:none;
+    z-index:5;
+    display:flex; flex-direction:column; justify-content:space-between;
+  }
+  .grain{
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    background: radial-gradient(circle at 50% 40%, rgba(0,255,200,0.05), transparent 60%);
+    mix-blend-mode: screen;
+    z-index:4;
+  }
+  .depthVignette{
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    box-shadow: inset 0 0 20vw 3vw rgba(1,4,6,0.9);
+    pointer-events:none;
+    z-index:4;
+  }
+    #topbar{
+    padding: 16px 18px;
+    display:flex; justify-content:space-between; align-items:flex-start;
+  }
+  #wordmark{
+    color: var(--teal);
+    font-size: 12px;
+    letter-spacing: 5px;
+    text-transform: uppercase;
+    text-shadow: 0 0 8px rgba(0,255,200,0.8);
+  }
+  #wordmark small{
+    display:block; margin-top:3px; color: var(--coral);
+    font-size: 9px; letter-spacing:3px; text-shadow: 0 0 6px var(--coral);
+  }
+
+  #depthGauge{
+    display:flex; gap:6px; align-items:center;
+    pointer-events:auto;
+  }
+  .gaugeDot{
+    width:9px; height:9px; border-radius:50%;
+    border: 1.5px solid rgba(0,255,200,0.5);
+    background: transparent;
+    transition: all .25s ease;
+  }
+  .gaugeDot.on{
+    background: var(--teal);
+    box-shadow: 0 0 10px var(--teal), 0 0 20px rgba(0,255,200,0.6);
+    border-color: var(--teal);
+  }
+
+  #rawToggle{
+    pointer-events:auto;
+    margin-left:12px;
+    background:transparent;
+    border:1px solid rgba(255,180,0,0.5);
+    color: var(--amber);
+    font-family:inherit;
+    font-size: 8.5px;
+    letter-spacing: 2px;
+    text-transform:uppercase;
+    padding: 5px 8px;
+    cursor:pointer;
+    border-radius: 3px;
+  }
+  #rawToggle:active{ background: rgba(255,180,0,0.15); }
+
+  #bottombar{
+    padding: 0 18px 10px;
+    display:flex; justify-content:space-between; align-items:flex-end;
+  }
+  .hintText{
+    color: rgba(234,255,250,0.35);
+    font-size: 9.5px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+  #ping{
+    width:16px; height:16px; border-radius:50%;
+    border: 1.5px solid var(--teal);
+    position: relative;
+  }
+  #ping::after{
+    content:''; position:absolute; inset:-6px;
+    border-radius:50%; border: 1px solid rgba(0,255,200,0.5);
+    animation: pingOut 2.2s ease-out infinite;
+  }
+  @keyframes pingOut{
+    0%{ transform:scale(0.4); opacity:1; }
+    100%{ transform:scale(2.4); opacity:0; }
+  }
+
+  #hexCorners span{
+    position:absolute; width:26px; height:26px; z-index:5;
+    border: 1.5px solid rgba(0,255,200,0.45);
+  }
+  #hx1{ top:10px; left:10px; border-right:none; border-bottom:none; clip-path: polygon(0 0, 100% 0, 100% 30%, 30% 30%, 30% 100%, 0 100%); }
+  #hx2{ top:10px; right:10px; border-left:none; border-bottom:none; clip-path: polygon(0 0, 100% 0, 100% 100%, 70% 100%, 70% 30%, 0 30%); }
+  #hx3{ bottom:10px; left:10px; border-right:none; border-top:none; clip-path: polygon(0 0, 30% 0, 30% 70%, 100% 70%, 100% 100%, 0 100%); }
+  #hx4{ bottom:10px; right:10px; border-left:none; border-top:none; clip-path: polygon(70% 0, 100% 0, 100% 100%, 0 100%, 0 70%, 70% 70%); }
+
+  #debugLine{
+    position:absolute; bottom:0; left:0; width:100%;
+    text-align:center; padding: 3px 0 7px;
+    color: rgba(0,255,200,0.55);
+    font-size: 9px; letter-spacing: 1px;
+    z-index:6; pointer-events:none;
+  }
+
+  #startOverlay{
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    background: radial-gradient(circle at 50% 42%, #051014 0%, #020608 72%);
+    display:flex; align-items:center; justify-content:center;
+    flex-direction:column; z-index:20; text-align:center;
+    padding: 26px; box-sizing:border-box;
+  }
+  #startOverlay h1{
+    color: var(--foam); font-size: clamp(19px,3.2vw,32px);
+    letter-spacing: 6px; text-transform: uppercase;
+    font-weight: 600; margin: 0 0 8px;
+  }
+  #startOverlay h1 span{ color: var(--teal); text-shadow: 0 0 16px rgba(0,255,200,0.7); }
+  #startOverlay p{
+    color: rgba(234,255,250,0.45); font-size: 12px; letter-spacing: 1px;
+    margin: 0 0 30px; max-width: 420px; line-height: 1.7;
+  }
+  #startBtn{
+    background: transparent; color: var(--teal);
+    border: 1.5px solid var(--teal);
+    padding: 14px 32px; font-size: 12.5px; letter-spacing: 3px;
+    text-transform: uppercase; cursor: pointer;
+    box-shadow: 0 0 14px rgba(0,255,200,0.3), inset 0 0 14px rgba(0,255,200,0.08);
+    transition: all .2s ease; font-family: inherit;
+  }
+  #startBtn:disabled{ opacity:0.5; cursor:default; }
+  #startBtn:not(:disabled):hover{
+    background: rgba(0,255,200,0.1);
+    box-shadow: 0 0 26px rgba(0,255,200,0.55), inset 0 0 20px rgba(0,255,200,0.18);
+  }
+  #statusLine{
+    margin-top:18px; color: rgba(234,255,250,0.4); font-size:10.5px;
+    letter-spacing:1px; min-height:16px;
+  }
+  #errBox{
+    margin-top:14px; color: var(--coral); font-size:11px; letter-spacing:0.3px;
+    max-width:440px; line-height:1.6; display:none; text-align:left;
+    border: 1px solid rgba(255,79,129,0.35);
+    background: rgba(255,79,129,0.06);
+    padding: 12px 14px; border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="inputVideo" playsinline muted autoplay webkit-playsinline="true"></video>
+
+  <div id="startOverlay">
+    <h1>Bio<span>-Loom</span></h1>
+    <p>A bioluminescent hand-tracking rig. Activate the camera and weave
+       glowing tendrils between your left and right fingertips — let them
+       touch to spark plankton bursts.</p>
+    <button id="startBtn">Descend &amp; Activate</button>
+    <div id="statusLine"></div>
+    <div id="errBox"></div>
+  </div>
+
+  <div id="hud">
+    <div id="topbar">
+      <div id="wordmark">Bio-Loom<small>hand weave rig</small></div>
+      <div id="depthGauge">
+        <div class="gaugeDot" id="dotL"></div>
+        <div class="gaugeDot" id="dotR"></div>
+        <button id="rawToggle" title="Show unprocessed camera feed to test if the camera itself works">Raw Feed</button>
+      </div>
+    </div>
+    <div id="bottombar">
+      <div class="hintText">Touch fingertips across hands to spark</div>
+      <div id="ping"></div>
+    </div>
+  </div>
+
+  <div class="grain"></div>
+  <div class="depthVignette"></div>
+  <div id="hexCorners"><span id="hx1"></span><span id="hx2"></span><span id="hx3"></span><span id="hx4"></span></div>
+  <div id="debugLine">—</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+<script>
+/* ---------------------------------------------------------------
+   BIO-LOOM — bioluminescent hand-tracked tendrils + spark bursts
+
+   ROOT-CAUSE FIX applied here: the <video> element is kept
+   `opacity:0` (still rendered / still decoding) instead of the
+   previous `display:none`. Several mobile Chromium builds pause
+   video frame decoding entirely for display:none elements as a
+   battery-saving optimization -- the stream connects fine and
+   readyState looks valid, but every canvas drawImage() read comes
+   back black. Keeping the element visually transparent but still
+   in the render tree keeps frames flowing reliably.
+
+   A "Raw Feed" toggle is also included in the HUD: it swaps to
+   showing the untouched <video> element directly (bypassing p5 /
+   canvas entirely) so a black screen can be isolated to either
+   "camera never produced frames" or "canvas never drew them".
+   --------------------------------------------------------------- */
+
+const FINGERTIPS = [4, 8, 12, 16, 20];
+const FINGER_NAMES = ['thumb','index','middle','ring','pinky'];
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],
+  [0,17]
+];
+const FINGER_COLOR = {
+  thumb:  [0,255,200],
+  index:  [80,255,220],
+  middle: [255,79,129],
+  ring:   [255,140,170],
+  pinky:  [255,180,0]
+};
+
+let latestResults = null;
+let videoEl = document.getElementById('inputVideo');
+let mediaStream = null;
+let hands = null;
+let started = false;
+let videoReady = false;
+let modelReady = false;
+let detectLoopRunning = false;
+let rawMode = false;
+
+let touchState = {};
+let particles = [];
+let lastFrameTime = performance.now();
+let fpsSmooth = 0;
+
+const debugLine = document.getElementById('debugLine');
+function setDebug(msg){ if(debugLine) debugLine.textContent = msg; }
+
+function friendlyCameraError(err){
+  const name = err && err.name ? err.name : '';
+  if(name === 'NotAllowedError' || name === 'PermissionDeniedError'){
+    return 'Camera permission denied. Allow camera access for this site in your browser settings, then reload.';
+  }
+  if(name === 'NotFoundError' || name === 'DevicesNotFoundError'){
+    return 'No camera device found on this device.';
+  }
+  if(name === 'NotReadableError' || name === 'TrackStartError'){
+    return 'Camera is busy or blocked by another app. Close other apps/tabs using the camera and retry.';
+  }
+  if(name === 'OverconstrainedError'){
+    return 'Requested camera settings are not supported on this device.';
+  }
+  if(name === 'SecurityError'){
+    return 'Camera blocked: this page must be loaded over HTTPS or localhost, not opened as a local file.';
+  }
+  return (name ? name + ': ' : '') + (err && err.message ? err.message : String(err));
+}
+
+async function startCamera(){
+  const constraintsPrimary = {
+    audio: false,
+    video: { facingMode: 'user', width: { ideal: 960 }, height: { ideal: 720 } }
+  };
+  try{
+    mediaStream = await navigator.mediaDevices.getUserMedia(constraintsPrimary);
+  } catch(e){
+    mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  }
+
+  videoEl.srcObject = mediaStream;
+  videoEl.muted = true;
+  videoEl.setAttribute('muted','');
+  videoEl.setAttribute('playsinline','');
+
+  await new Promise((resolve, reject) => {
+    const to = setTimeout(() => reject(new Error('Timed out waiting for camera video to be ready.')), 8000);
+    videoEl.onloadedmetadata = () => { clearTimeout(to); resolve(); };
+  });
+
+  try { await videoEl.play(); } catch(e) { /* best-effort autoplay nudge */ }
+  videoReady = true;
+
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible' && videoEl.paused){
+      videoEl.play().catch(()=>{});
+    }
+  });
+}
+
+async function loadHandsModel(){
+  hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 0,
+    minDetectionConfidence: 0.65,
+    minTrackingConfidence: 0.55
+  });
+  hands.onResults((results) => {
+    latestResults = results;
+    const n = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
+    document.getElementById('dotL').classList.toggle('on', n >= 1);
+    document.getElementById('dotR').classList.toggle('on', n >= 2);
+  });
+  await hands.initialize();
+  modelReady = true;
+}
+
+function detectionLoop(){
+  if(!detectLoopRunning) return;
+  if(videoReady && videoEl.readyState >= 2 && videoEl.videoWidth > 0 && hands){
+    hands.send({ image: videoEl }).catch(()=>{});
+  }
+  requestAnimationFrame(detectionLoop);
+}
+
+document.getElementById('rawToggle').addEventListener('click', () => {
+  rawMode = !rawMode;
+  videoEl.classList.toggle('rawPreview', rawMode);
+  const canvasEl = document.querySelector('#stage canvas');
+  if(canvasEl) canvasEl.classList.toggle('hiddenForRaw', rawMode);
+  document.getElementById('rawToggle').style.color = rawMode ? '#ff4f81' : '';
+  document.getElementById('rawToggle').textContent = rawMode ? 'Exit Raw' : 'Raw Feed';
+});
+
+document.getElementById('startBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('startBtn');
+  const errBox = document.getElementById('errBox');
+  const statusLine = document.getElementById('statusLine');
+  errBox.style.display = 'none';
+  btn.disabled = true;
+
+  try{
+    if(location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1'){
+      throw { name: 'SecurityError' };
+    }
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      throw new Error('This browser does not support camera access (getUserMedia unavailable).');
+    }
+
+    statusLine.textContent = 'Requesting camera…';
+    await startCamera();
+
+    statusLine.textContent = 'Loading hand-tracking model…';
+    await loadHandsModel();
+
+    detectLoopRunning = true;
+    detectionLoop();
+
+    started = true;
+    document.getElementById('startOverlay').style.display = 'none';
+  } catch(err){
+    const msg = (err && err.name) ? friendlyCameraError(err) : (err && err.message ? err.message : String(err));
+    errBox.style.display = 'block';
+    errBox.textContent = msg;
+    statusLine.textContent = '';
+    btn.disabled = false;
+    btn.textContent = 'Retry';
+  }
+});
+
+/* ------------------------- p5 sketch ------------------------- */
+
+function toPixel(lm, w, h){
+  return { x: w - lm.x * w, y: lm.y * h };
+}
+function dist2(a,b){
+  const dx=a.x-b.x, dy=a.y-b.y;
+  return Math.sqrt(dx*dx+dy*dy);
+}
+function lerpColor3(c1, c2, t){
+  return [
+    c1[0] + (c2[0]-c1[0])*t,
+    c1[1] + (c2[1]-c1[1])*t,
+    c1[2] + (c2[2]-c1[2])*t
+  ];
+}
+function spawnBurst(x, y, baseColor){
+  const count = 30;
+  for(let i=0;i<count;i++){
+    const ang = Math.random()*Math.PI*2;
+    const speed = 1.5 + Math.random()*5;
+    particles.push({
+      x, y,
+      vx: Math.cos(ang)*speed,
+      vy: Math.sin(ang)*speed - 0.6,   // slight upward drift, like plankton
+      life: 1,
+      decay: 0.016 + Math.random()*0.018,
+      size: 1.3 + Math.random()*2.2,
+      color: Math.random() < 0.5 ? baseColor : [255,180,0]
+    });
+  }
+}
+
+function setup(){
+  const c = createCanvas(windowWidth, windowHeight);
+  c.parent('stage');
+  frameRate(60);
+  pixelDensity(1);
+}
+function windowResized(){
+  resizeCanvas(windowWidth, windowHeight);
+}
+
+function draw(){
+  const now = performance.now();
+  const dt = now - lastFrameTime;
+  lastFrameTime = now;
+  const instFps = 1000/Math.max(dt,1);
+  fpsSmooth = fpsSmooth ? fpsSmooth*0.9 + instFps*0.1 : instFps;
+
+  if(rawMode){ clear(); return; }   // let the raw <video> show through untouched
+
+  background(2,6,8);
+
+  if(!started){
+    drawIdleField();
+    return;
+  }
+
+  drawVideoBackground();
+
+  if(latestResults && latestResults.multiHandLandmarks && latestResults.multiHandLandmarks.length > 0){
+    const hands_ = [];
+    for(let i=0;i<latestResults.multiHandLandmarks.length;i++){
+      const lms = latestResults.multiHandLandmarks[i];
+      const handedness = latestResults.multiHandedness && latestResults.multiHandedness[i]
+        ? latestResults.multiHandedness[i].label : ('H'+i);
+      const pts = lms.map(lm => toPixel(lm, width, height));
+      hands_.push({ label: handedness, pts });
+    }
+    for(const h of hands_) drawHandSkeleton(h.pts);
+
+    const left = hands_.find(h => h.label === 'Left');
+    const right = hands_.find(h => h.label === 'Right');
+    if(left && right){
+      drawTendrils(left, right);
+    } else if(hands_.length === 2){
+      drawTendrils(hands_[0], hands_[1]);
+    }
+  } else {
+    touchState = {};
+  }
+
+  updateAndDrawParticles();
+  drawDepthOverlay();
+
+  if(frameCount % 15 === 0){
+    setDebug(`video ${videoEl.videoWidth}x${videoEl.videoHeight} · stream ${mediaStream ? 'live' : 'none'} · model ${modelReady ? 'ready' : 'loading'} · fps ${Math.round(fpsSmooth)}`);
+  }
+}
+
+function drawIdleField(){
+  push();
+  noStroke();
+  for(let i=0;i<40;i++){
+    const x = (noise(i*10, frameCount*0.002) * width);
+    const y = (noise(i*10+50, frameCount*0.002+50) * height);
+    fill(0,255,200, 25);
+    circle(x,y, 2);
+  }
+  pop();
+}
+
+function drawVideoBackground(){
+  if(videoReady && videoEl.readyState >= 2 && videoEl.videoWidth > 0){
+    push();
+    translate(width, 0);
+    scale(-1,1);
+    image(videoEl, 0, 0, width, height);
+    pop();
+    noStroke();
+    fill(2,8,10,120);
+    rect(0,0,width,height);
+  } else {
+    drawIdleField();
+    push();
+    noStroke();
+    fill(0,255,200,220);
+    textAlign(CENTER, CENTER);
+    textSize(12.5);
+    text('AWAITING CAMERA SIGNAL…', width/2, height/2);
+    textSize(9.5);
+    fill(0,255,200,140);
+    text('tap "Raw Feed" above to test the camera directly', width/2, height/2+22);
+    pop();
+  }
+}
+
+function drawHandSkeleton(pts){
+  const ctx = drawingContext;
+  ctx.save();
+  ctx.shadowBlur = 7;
+  ctx.shadowColor = 'rgba(0,255,200,0.7)';
+  ctx.strokeStyle = 'rgba(150,255,235,0.45)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  for(const [a,b] of HAND_CONNECTIONS){
+    ctx.moveTo(pts[a].x, pts[a].y);
+    ctx.lineTo(pts[b].x, pts[b].y);
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  for(let i=0;i<pts.length;i++){
+    const isTip = FINGERTIPS.includes(i);
+    const fingerIdx = Math.max(0, Math.ceil(i/4)-1);
+    const col = FINGER_COLOR[FINGER_NAMES[fingerIdx]] || [0,255,200];
+    const r = isTip ? 5 : 2.4;
+    ctx.save();
+    ctx.shadowBlur = isTip ? 18 : 9;
+    ctx.shadowColor = `rgb(${col[0]},${col[1]},${col[2]})`;
+    ctx.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},${isTip ? 0.95 : 0.75})`;
+    ctx.beginPath();
+    ctx.arc(pts[i].x, pts[i].y, r, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+const NEAR_D = 60;
+const FAR_D = 700;
+
+function drawTendrils(handA, handB){
+  const ctx = drawingContext;
+  for(let f=0; f<FINGERTIPS.length; f++){
+    const a = handA.pts[FINGERTIPS[f]];
+    const b = handB.pts[FINGERTIPS[f]];
+    const d = dist2(a,b);
+    const t = constrain(map(d, NEAR_D, FAR_D, 0, 1), 0, 1);
+
+    const cool = FINGER_COLOR[FINGER_NAMES[f]];
+    const hot = [255, 255, 235];
+    const col = lerpColor3(cool, hot, t);
+
+    const baseW = lerp(5, 1.3, t);
+    const glow = lerp(12, 28, t);
+
+    // organic undulating tendril: multi-point wave instead of a single curve
+    const segs = 5;
+    const wave = (1-t) * 10 + 2;
+
+    ctx.save();
+    ctx.shadowBlur = glow;
+    ctx.shadowColor = `rgba(${col[0]},${col[1]},${col[2]},0.95)`;
+    ctx.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},0.88)`;
+    ctx.lineWidth = baseW;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    for(let s=1; s<segs; s++){
+      const pr = s/segs;
+      const px = a.x + (b.x-a.x)*pr;
+      const py = a.y + (b.y-a.y)*pr;
+      const normX = -(b.y-a.y);
+      const normY = (b.x-a.x);
+      const nlen = Math.hypot(normX, normY) || 1;
+      const wobble = Math.sin(frameCount*0.08 + f*2 + s) * wave;
+      ctx.lineTo(px + (normX/nlen)*wobble, py + (normY/nlen)*wobble);
+    }
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+
+    ctx.shadowBlur = glow*0.45;
+    ctx.strokeStyle = `rgba(255,255,255,${0.5 + 0.35*(1-t)})`;
+    ctx.lineWidth = Math.max(baseW*0.3, 0.6);
+    ctx.stroke();
+    ctx.restore();
+
+    const key = f;
+    const touching = d < NEAR_D * 0.7;
+    if(touching && !touchState[key]){
+      spawnBurst((a.x+b.x)/2, (a.y+b.y)/2, [255,255,255]);
+      spawnBurst((a.x+b.x)/2, (a.y+b.y)/2, cool);
+      touchState[key] = true;
+    } else if(!touching && d > NEAR_D * 1.1){
+      touchState[key] = false;
+    }
+  }
+}
+
+function updateAndDrawParticles(){
+  const ctx = drawingContext;
+  ctx.save();
+  for(let i=particles.length-1;i>=0;i--){
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy;
+    p.vx *= 0.95; p.vy = p.vy*0.95 - 0.02;
+    p.life -= p.decay;
+    if(p.life <= 0){ particles.splice(i,1); continue; }
+    ctx.globalAlpha = Math.max(p.life, 0);
+    ctx.shadowBlur = 14;
+    ctx.shadowColor = `rgb(${p.color[0]},${p.color[1]},${p.color[2]})`;
+    ctx.fillStyle = `rgb(${p.color[0]},${p.color[1]},${p.color[2]})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+  if(particles.length > 900) particles.splice(0, particles.length - 900);
+}
+
+function drawDepthOverlay(){
+  const ctx = drawingContext;
+  ctx.save();
+  const g = ctx.createRadialGradient(width/2,height/2, height*0.35, width/2,height/2, height*0.75);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(2,6,8,0.6)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,width,height);
+  ctx.restore();
+}
+</script>
+</body>
+</html>
