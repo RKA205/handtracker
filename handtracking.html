@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NEON HAND // AI TRACKER</title>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: #020406;
+      color: #00fff7;
+      font-family: "Courier New", monospace;
+    }
+
+    /* Camera */
+    #video {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      filter: brightness(0.55) contrast(1.25) saturate(1.2);
+      z-index: 1;
+    }
+
+    /* Neon overlay */
+    #canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    /* Scanlines */
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: 3;
+      pointer-events: none;
+      background:
+        repeating-linear-gradient(
+          to bottom,
+          rgba(0, 255, 255, 0.025) 0px,
+          rgba(0, 255, 255, 0.025) 1px,
+          transparent 2px,
+          transparent 5px
+        );
+    }
+
+    /* Top HUD */
+    .topbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 5;
+
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+
+      padding: 15px 22px;
+
+      background: rgba(0, 10, 15, 0.72);
+      border-bottom: 1px solid rgba(0, 255, 255, 0.35);
+      backdrop-filter: blur(8px);
+    }
+
+    .logo {
+      font-size: 18px;
+      font-weight: bold;
+      letter-spacing: 3px;
+      text-shadow:
+        0 0 5px #00fff7,
+        0 0 15px #00fff7;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      letter-spacing: 2px;
+    }
+
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #ff3030;
+      box-shadow: 0 0 10px #ff3030;
+    }
+
+    .status-dot.active {
+      background: #00ff88;
+      box-shadow: 0 0 10px #00ff88;
+    }
+
+    /* Left HUD */
+    .hud-left {
+      position: fixed;
+      left: 18px;
+      top: 90px;
+      z-index: 5;
+
+      padding: 15px;
+      min-width: 190px;
+
+      background: rgba(0, 8, 12, 0.68);
+      border-left: 2px solid #00fff7;
+      box-shadow: 0 0 20px rgba(0, 255, 255, 0.12);
+      backdrop-filter: blur(7px);
+    }
+
+    .hud-title {
+      color: #fff;
+      font-size: 11px;
+      margin-bottom: 12px;
+      letter-spacing: 2px;
+    }
+
+    .hud-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 25px;
+      margin: 8px 0;
+      font-size: 11px;
+    }
+
+    .hud-value {
+      color: #fff;
+    }
+
+    /* Right HUD */
+    .hud-right {
+      position: fixed;
+      right: 18px;
+      top: 90px;
+      z-index: 5;
+
+      text-align: right;
+      font-size: 10px;
+      line-height: 1.8;
+      letter-spacing: 1px;
+
+      color: rgba(0, 255, 247, 0.75);
+    }
+
+    /* Bottom */
+    .bottom-hud {
+      position: fixed;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%);
+      z-index: 5;
+
+      padding: 9px 18px;
+
+      border: 1px solid rgba(0, 255, 247, 0.4);
+      background: rgba(0, 8, 12, 0.72);
+
+      font-size: 10px;
+      letter-spacing: 2px;
+      white-space: nowrap;
+
+      box-shadow: 0 0 15px rgba(0, 255, 247, 0.1);
+      backdrop-filter: blur(8px);
+    }
+
+    /* Corner brackets */
+    .corner {
+      position: fixed;
+      z-index: 4;
+      width: 45px;
+      height: 45px;
+      pointer-events: none;
+    }
+
+    .corner.tl {
+      top: 75px;
+      left: 15px;
+      border-top: 2px solid #00fff7;
+      border-left: 2px solid #00fff7;
+    }
+
+    .corner.tr {
+      top: 75px;
+      right: 15px;
+      border-top: 2px solid #00fff7;
+      border-right: 2px solid #00fff7;
+    }
+
+    .corner.bl {
+      bottom: 15px;
+      left: 15px;
+      border-bottom: 2px solid #00fff7;
+      border-left: 2px solid #00fff7;
+    }
+
+    .corner.br {
+      bottom: 15px;
+      right: 15px;
+      border-bottom: 2px solid #00fff7;
+      border-right: 2px solid #00fff7;
+    }
+
+    /* Mobile */
+    @media (max-width: 600px) {
+      .logo {
+        font-size: 13px;
+      }
+
+      .hud-left {
+        top: 75px;
+        left: 10px;
+        min-width: 155px;
+        padding: 10px;
+      }
+
+      .hud-right {
+        top: 75px;
+        right: 10px;
+        font-size: 8px;
+      }
+
+      .bottom-hud {
+        font-size: 8px;
+        bottom: 10px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Camera -->
+  <video id="video" autoplay muted playsinline></video>
+
+  <!-- Hand Tracking Canvas -->
+  <canvas id="canvas"></canvas>
+
+  <!-- Top HUD -->
+  <div class="topbar">
+    <div class="logo">
+      // NEON_HAND_AI
+    </div>
+
+    <div class="status">
+      <span id="statusDot" class="status-dot"></span>
+      <span id="statusText">SYSTEM OFFLINE</span>
+    </div>
+  </div>
+
+  <!-- Left Information HUD -->
+  <div class="hud-left">
+    <div class="hud-title">
+      [ HAND ANALYSIS ]
+    </div>
+
+    <div class="hud-row">
+      <span>LEFT HAND</span>
+      <span id="leftHand" class="hud-value">--</span>
+    </div>
+
+    <div class="hud-row">
+      <span>RIGHT HAND</span>
+      <span id="rightHand" class="hud-value">--</span>
+    </div>
+
+    <div class="hud-row">
+      <span>LANDMARKS</span>
+      <span id="landmarks" class="hud-value">0</span>
+    </div>
+
+    <div class="hud-row">
+      <span>FPS</span>
+      <span id="fps" class="hud-value">0</span>
+    </div>
+  </div>
+
+  <!-- Right Technical HUD -->
+  <div class="hud-right">
+    <div>AI VISION : ACTIVE</div>
+    <div>MODEL : MEDIAPIPE HANDS</div>
+    <div>TRACKING : 21 POINTS / HAND</div>
+    <div>MODE : REALTIME</div>
+    <div>CAMERA : MIRRORED</div>
+  </div>
+
+  <!-- Corner UI -->
+  <div class="corner tl"></div>
+  <div class="corner tr"></div>
+  <div class="corner bl"></div>
+  <div class="corner br"></div>
+
+  <!-- Bottom HUD -->
+  <div class="bottom-hud">
+    [ AI HAND DETECTION // NEURAL VISION ONLINE ]
+  </div>
+  <script>
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+
+  const statusDot = document.getElementById("statusDot");
+  const statusText = document.getElementById("statusText");
+
+  const leftHandText = document.getElementById("leftHand");
+  const rightHandText = document.getElementById("rightHand");
+  const landmarksText = document.getElementById("landmarks");
+  const fpsText = document.getElementById("fps");
+
+  let lastTime = performance.now();
+  let frameCount = 0;
+  let fps = 0;
+
+  // Resize canvas
+  function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+
+  window.addEventListener("resize", resizeCanvas);
+  resizeCanvas();
+
+  // MediaPipe Hands
+  const hands = new Hands({
+    locateFile: (file) => {
+      return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }
+  });
+
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.65,
+    minTrackingConfidence: 0.65
+  });
+
+  // Neon color palette
+  const colors = [
+    "#00fff7",
+    "#00ff88"
+  ];
+
+  // Hand connections
+  const connections = [
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 4],
+
+    [0, 5],
+    [5, 6],
+    [6, 7],
+    [7, 8],
+
+    [0, 9],
+    [9, 10],
+    [10, 11],
+    [11, 12],
+
+    [0, 13],
+    [13, 14],
+    [14, 15],
+    [15, 16],
+
+    [0, 17],
+    [17, 18],
+    [18, 19],
+    [19, 20],
+
+    [5, 9],
+    [9, 13],
+    [13, 17]
+  ];
+
+  function pointToScreen(point) {
+    return {
+      x: (1 - point.x) * canvas.width,
+      y: point.y * canvas.height
+    };
+  }
+
+  function drawGlowLine(a, b, color) {
+    const p1 = pointToScreen(a);
+    const p2 = pointToScreen(b);
+
+    ctx.save();
+
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = color;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+
+    ctx.restore();
+
+    // Thin bright core
+    ctx.save();
+
+    ctx.strokeStyle = "#ffffff";
+    ctx.globalAlpha = 0.75;
+    ctx.lineWidth = 0.7;
+
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawNeonPoint(point, color, index) {
+    const p = pointToScreen(point);
+
+    ctx.save();
+
+    // Outer glow
+    ctx.shadowBlur = 25;
+    ctx.shadowColor = color;
+
+    ctx.fillStyle = color;
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Middle circle
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#001719";
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // White center
+    ctx.fillStyle = "#ffffff";
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    // Landmark number
+    if (index % 4 === 0) {
+      ctx.save();
+
+      ctx.font = "9px monospace";
+      ctx.fillStyle = color;
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = color;
+
+      ctx.fillText(
+        String(index),
+        p.x + 9,
+        p.y - 7
+      );
+
+      ctx.restore();
+    }
+  }
+
+  function drawBoundingBox(landmarks, color, handNumber) {
+    let minX = 1;
+    let minY = 1;
+    let maxX = 0;
+    let maxY = 0;
+
+    landmarks.forEach(point => {
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+    });
+
+    const padding = 0.025;
+
+    minX = Math.max(0, minX - padding);
+    minY = Math.max(0, minY - padding);
+    maxX = Math.min(1, maxX + padding);
+    maxY = Math.min(1, maxY + padding);
+
+    const x = (1 - maxX) * canvas.width;
+    const y = minY * canvas.height;
+
+    const width = (maxX - minX) * canvas.width;
+    const height = (maxY - minY) * canvas.height;
+
+    ctx.save();
+
+    ctx.strokeStyle = color;
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = color;
+    ctx.lineWidth = 1.5;
+
+    ctx.strokeRect(x, y, width, height);
+
+    // Corner markers
+    const size = 12;
+
+    ctx.lineWidth = 3;
+
+    // Top-left
+    ctx.beginPath();
+    ctx.moveTo(x, y + size);
+    ctx.lineTo(x, y);
+    ctx.lineTo(x + size, y);
+    ctx.stroke();
+
+    // Top-right
+    ctx.beginPath();
+    ctx.moveTo(x + width - size, y);
+    ctx.lineTo(x + width, y);
+    ctx.lineTo(x + width, y + size);
+    ctx.stroke();
+
+    // Bottom-left
+    ctx.beginPath();
+    ctx.moveTo(x, y + height - size);
+    ctx.lineTo(x, y + height);
+    ctx.lineTo(x + size, y + height);
+    ctx.stroke();
+
+    // Bottom-right
+    ctx.beginPath();
+    ctx.moveTo(x + width - size, y + height);
+    ctx.lineTo(x + width, y + height);
+    ctx.lineTo(x + width, y + height - size);
+    ctx.stroke();
+
+    // Label
+    ctx.font = "bold 11px monospace";
+    ctx.fillStyle = color;
+
+    const label =
+      handNumber === 0
+        ? "HAND_01"
+        : "HAND_02";
+
+    ctx.fillText(label, x, Math.max(18, y - 7));
+
+    ctx.restore();
+  }
+
+  function drawCenterTarget(landmarks, color) {
+    const wrist = pointToScreen(landmarks[0]);
+
+    ctx.save();
+
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.45;
+    ctx.lineWidth = 1;
+
+    ctx.beginPath();
+    ctx.arc(
+      wrist.x,
+      wrist.y,
+      22,
+      0,
+      Math.PI * 2
+    );
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(wrist.x - 30, wrist.y);
+    ctx.lineTo(wrist.x + 30, wrist.y);
+
+    ctx.moveTo(wrist.x, wrist.y - 30);
+    ctx.lineTo(wrist.x, wrist.y + 30);
+
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // Main detection callback
+  hands.onResults(results => {
+
+    ctx.clearRect(
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+
+    const detectedHands =
+      results.multiHandLandmarks || [];
+
+    const handedness =
+      results.multiHandedness || [];
+
+    let leftDetected = false;
+    let rightDetected = false;
+
+    let totalLandmarks = 0;
+
+    detectedHands.forEach((landmarks, handIndex) => {
+
+      totalLandmarks += landmarks.length;
+
+      const rawLabel =
+        handedness[handIndex]?.label || "Unknown";
+
+      /*
+        Camera image is mirrored.
+        MediaPipe's label is therefore swapped
+        for the visual display.
+      */
+      const visualLabel =
+        rawLabel === "Left"
+          ? "RIGHT"
+          : "LEFT";
+
+      const color =
+        visualLabel === "LEFT"
+          ? colors[0]
+          : colors[1];
+
+      if (visualLabel === "LEFT") {
+        leftDetected = true;
+      }
+
+      if (visualLabel === "RIGHT") {
+        rightDetected = true;
+      }
+
+      // Skeleton
+      connections.forEach(connection => {
+        const a = landmarks[connection[0]];
+        const b = landmarks[connection[1]];
+
+        if (a && b) {
+          drawGlowLine(a, b, color);
+        }
+      });
+
+      // Bounding box
+      drawBoundingBox(
+        landmarks,
+        color,
+        handIndex
+      );
+
+      // Center target
+      drawCenterTarget(
+        landmarks,
+        color
+      );
+
+      // All 21 landmarks
+      landmarks.forEach((point, index) => {
+        drawNeonPoint(
+          point,
+          color,
+          index
+        );
+      });
+
+      // Finger tip pulse
+      [4, 8, 12, 16, 20].forEach(index => {
+
+        const p =
+          pointToScreen(landmarks[index]);
+
+        const pulse =
+          10 +
+          Math.sin(
+            performance.now() / 120
+          ) * 4;
+
+        ctx.save();
+
+        ctx.strokeStyle = color;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = color;
+        ctx.globalAlpha = 0.8;
+
+        ctx.beginPath();
+        ctx.arc(
+          p.x,
+          p.y,
+          pulse,
+          0,
+          Math.PI * 2
+        );
+
+        ctx.stroke();
+
+        ctx.restore();
+      });
+    });
+
+    // HUD
+    leftHandText.textContent =
+      leftDetected ? "DETECTED" : "--";
+
+    rightHandText.textContent =
+      rightDetected ? "DETECTED" : "--";
+
+    landmarksText.textContent =
+      totalLandmarks;
+
+    if (detectedHands.length > 0) {
+      statusDot.classList.add("active");
+      statusText.textContent =
+        "SYSTEM ONLINE // HAND DETECTED";
+    } else {
+      statusDot.classList.remove("active");
+      statusText.textContent =
+        "SCANNING FOR HAND...";
+    }
+
+    // FPS
+    frameCount++;
+
+    const now = performance.now();
+
+    if (now - lastTime >= 1000) {
+      fps = frameCount;
+      frameCount = 0;
+      lastTime = now;
+
+      fpsText.textContent = fps;
+    }
+  });
+
+  // Camera
+  async function startCamera() {
+
+    try {
+
+      statusText.textContent =
+        "REQUESTING CAMERA...";
+
+      const stream =
+        await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "user",
+            width: {
+              ideal: 1280
+            },
+            height: {
+              ideal: 720
+            }
+          },
+          audio: false
+        });
+
+      video.srcObject = stream;
+
+      await video.play();
+
+      const camera = new Camera(
+        video,
+        {
+          onFrame: async () => {
+            await hands.send({
+              image: video
+            });
+          },
+
+          width: 1280,
+          height: 720
+        }
+      );
+
+      camera.start();
+
+    } catch (error) {
+
+      console.error(
+        "Camera error:",
+        error
+      );
+
+      statusDot.classList.remove("active");
+
+      statusText.textContent =
+        "CAMERA ACCESS DENIED";
+
+      alert(
+        "Camera access जरूरी है। Browser में Camera Permission Allow करें।"
+      );
+    }
+  }
+
+  // Start
+  startCamera();
+</script>
+
+  <!-- JavaScript Part 2 will go here -->
+
+</body>
+</html>
