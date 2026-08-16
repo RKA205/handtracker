@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cat's Cradle // Laser Rig</title>
+<style>
+  :root{
+    --cyan: #17f7e0;
+    --magenta: #ff2fd0;
+    --yellow: #f9ff3d;
+    --ink: #030407;
+  }
+  html, body{
+    margin:0; padding:0; width:100%; height:100%;
+    background: var(--ink);
+    overflow:hidden;
+    font-family: 'Segoe UI', 'Consolas', monospace;
+  }
+  #stage{ position:relative; width:100vw; height:100vh; }
+  video{ display:none; }
+  canvas{ position:absolute; top:0; left:0; display:block; }
+
+  #hud{
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    pointer-events:none;
+    z-index:5;
+    display:flex; flex-direction:column; justify-content:space-between;
+  }
+  .scanline{
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    background: repeating-linear-gradient(
+      to bottom, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px,
+      transparent 1px, transparent 3px);
+    mix-blend-mode: overlay;
+  }
+  .vignette{
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    box-shadow: inset 0 0 18vw 2vw rgba(0,0,0,0.85);
+    pointer-events:none;
+  }
+  #topbar{
+    padding: 18px 26px;
+    display:flex; justify-content:space-between; align-items:flex-start;
+    letter-spacing: 2px;
+  }
+  #title{
+    color: var(--cyan);
+    font-size: 13px;
+    text-transform: uppercase;
+    text-shadow: 0 0 6px var(--cyan), 0 0 18px rgba(23,247,224,0.5);
+  }
+  #title span{ color: var(--magenta); text-shadow: 0 0 6px var(--magenta); }
+  #status{
+    color: rgba(255,255,255,0.55);
+    font-size: 11px;
+    text-align:right;
+    line-height:1.6;
+  }
+  #status b{ color: var(--yellow); text-shadow: 0 0 6px var(--yellow); }
+  #bottombar{
+    padding: 0 26px 20px;
+    display:flex; justify-content:space-between; align-items:flex-end;
+  }
+  #hint{
+    color: rgba(255,255,255,0.35);
+    font-size: 10.5px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+  #corners div{
+    position:absolute; width:22px; height:22px;
+    border: 1.5px solid rgba(23,247,224,0.55);
+  }
+  #c1{ top:14px; left:14px; border-right:none; border-bottom:none; }
+  #c2{ top:14px; right:14px; border-left:none; border-bottom:none; }
+  #c3{ bottom:14px; left:14px; border-right:none; border-top:none; }
+  #c4{ bottom:14px; right:14px; border-left:none; border-top:none; }
+
+  #startOverlay{
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    background: radial-gradient(circle at 50% 45%, #0a0d14 0%, #030407 70%);
+    display:flex; align-items:center; justify-content:center;
+    flex-direction:column; z-index:20;
+    text-align:center;
+  }
+  #startOverlay h1{
+    color:#fff; font-size: clamp(20px,3.4vw,34px);
+    letter-spacing:4px; text-transform:uppercase;
+    font-weight:600; margin:0 0 6px;
+  }
+  #startOverlay h1 span{ color: var(--magenta); text-shadow:0 0 14px var(--magenta); }
+  #startOverlay p{
+    color: rgba(255,255,255,0.5); font-size:12.5px; letter-spacing:1.5px;
+    margin: 0 0 34px; max-width: 420px; line-height:1.7;
+  }
+  #startBtn{
+    background: transparent;
+    color: var(--cyan);
+    border: 1.5px solid var(--cyan);
+    padding: 14px 34px;
+    font-size: 13px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    cursor: pointer;
+    box-shadow: 0 0 14px rgba(23,247,224,0.35), inset 0 0 14px rgba(23,247,224,0.08);
+    transition: all 0.2s ease;
+    font-family: inherit;
+  }
+  #startBtn:hover{
+    background: rgba(23,247,224,0.12);
+    box-shadow: 0 0 26px rgba(23,247,224,0.6), inset 0 0 20px rgba(23,247,224,0.2);
+  }
+  #errBox{
+    margin-top:22px; color: var(--magenta); font-size:11.5px; letter-spacing:1px;
+    max-width:420px; display:none;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="inputVideo" playsinline></video>
+
+  <div id="startOverlay">
+    <h1>Cat's <span>Cradle</span></h1>
+    <p>Neon rig activates your camera and tracks both hands in real time.
+       Bring fingertips from opposite hands together to fire the strings.</p>
+    <button id="startBtn">Activate Rig</button>
+    <div id="errBox"></div>
+  </div>
+
+  <div id="hud">
+    <div id="topbar">
+      <div id="title">Cat's <span>Cradle</span> // Laser Rig</div>
+      <div id="status">HANDS: <b id="handCount">0</b>/2<br>FPS: <b id="fpsVal">--</b></div>
+    </div>
+    <div id="bottombar">
+      <div id="hint">Touch fingertips across hands to trigger a burst</div>
+      <div id="hint">Mediapipe Hands · p5.js</div>
+    </div>
+  </div>
+  <div class="scanline"></div>
+  <div class="vignette"></div>
+  <div id="corners"><div id="c1"></div><div id="c2"></div><div id="c3"></div><div id="c4"></div></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+/* ---------------------------------------------------------------
+   CAT'S CRADLE — neon hand-tracked laser strings + particle bursts
+   --------------------------------------------------------------- */
+
+const FINGERTIPS = [4, 8, 12, 16, 20];              // thumb..pinky tip ids
+const FINGER_NAMES = ['thumb','index','middle','ring','pinky'];
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],
+  [0,17]
+];
+// per-finger neon palette (cyan -> magenta -> yellow gradient across the hand)
+const FINGER_COLOR = {
+  thumb:  [23,247,224],   // cyan
+  index:  [110,200,255],
+  middle: [255,47,208],   // magenta
+  ring:   [255,140,230],
+  pinky:  [249,255,61]    // yellow
+};
+
+let latestResults = null;
+let videoEl = document.getElementById('inputVideo');
+let camera = null;
+let hands = null;
+let started = false;
+
+// touch/particle state keyed by "leftFingerIdx-rightFingerIdx"
+let touchState = {};
+let particles = [];
+
+let lastFrameTime = performance.now();
+let fpsSmooth = 0;
+
+function onResults(results){
+  latestResults = results;
+  const n = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
+  const el = document.getElementById('handCount');
+  if(el) el.textContent = n;
+}
+
+async function initHandTracking(){
+  hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.6
+  });
+  hands.onResults(onResults);
+
+  camera = new Camera(videoEl, {
+    onFrame: async () => { await hands.send({image: videoEl}); },
+    width: 960,
+    height: 720
+  });
+  await camera.start();
+}
+
+document.getElementById('startBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('startBtn');
+  const errBox = document.getElementById('errBox');
+  btn.textContent = 'Requesting Camera…';
+  btn.disabled = true;
+  try{
+    await initHandTracking();
+    started = true;
+    document.getElementById('startOverlay').style.display = 'none';
+  } catch(err){
+    errBox.style.display = 'block';
+    errBox.textContent = 'Camera access failed: ' + (err && err.message ? err.message : err);
+    btn.textContent = 'Retry';
+    btn.disabled = false;
+  }
+});
+
+/* ------------------------- p5 sketch ------------------------- */
+
+function toPixel(lm, w, h){
+  // mirror horizontally so it matches the mirrored video feed
+  return { x: w - lm.x * w, y: lm.y * h };
+}
+
+function dist2(a,b){
+  const dx=a.x-b.x, dy=a.y-b.y;
+  return Math.sqrt(dx*dx+dy*dy);
+}
+
+function lerpColor3(c1, c2, t){
+  return [
+    c1[0] + (c2[0]-c1[0])*t,
+    c1[1] + (c2[1]-c1[1])*t,
+    c1[2] + (c2[2]-c1[2])*t
+  ];
+}
+
+function spawnBurst(x, y, baseColor){
+  const count = 34;
+  for(let i=0;i<count;i++){
+    const ang = Math.random()*Math.PI*2;
+    const speed = 2 + Math.random()*6;
+    particles.push({
+      x, y,
+      vx: Math.cos(ang)*speed,
+      vy: Math.sin(ang)*speed,
+      life: 1,
+      decay: 0.018 + Math.random()*0.02,
+      size: 1.5 + Math.random()*2.5,
+      color: Math.random() < 0.5 ? baseColor : [249,255,61]
+    });
+  }
+}
+
+function setup(){
+  const c = createCanvas(windowWidth, windowHeight);
+  c.parent('stage');
+  frameRate(60);
+  pixelDensity(1);
+}
+
+function windowResized(){
+  resizeCanvas(windowWidth, windowHeight);
+}
+
+function draw(){
+  const now = performance.now();
+  const dt = now - lastFrameTime;
+  lastFrameTime = now;
+  const instFps = 1000/Math.max(dt,1);
+  fpsSmooth = fpsSmooth ? fpsSmooth*0.9 + instFps*0.1 : instFps;
+  const fpsEl = document.getElementById('fpsVal');
+  if(fpsEl && frameCount % 10 === 0) fpsEl.textContent = Math.round(fpsSmooth);
+
+  background(3,4,7);
+
+  if(!started){
+    drawIdleGrid();
+    return;
+  }
+
+  drawVideoBackground();
+
+  if(latestResults && latestResults.multiHandLandmarks && latestResults.multiHandLandmarks.length > 0){
+    const hands_ = [];
+    for(let i=0;i<latestResults.multiHandLandmarks.length;i++){
+      const lms = latestResults.multiHandLandmarks[i];
+      const handedness = latestResults.multiHandedness && latestResults.multiHandedness[i]
+        ? latestResults.multiHandedness[i].label : ('H'+i);
+      const pts = lms.map(lm => toPixel(lm, width, height));
+      hands_.push({ label: handedness, pts });
+    }
+
+    // draw skeletons + glowing joints for every hand present
+    for(const h of hands_) drawHandSkeleton(h.pts);
+
+    // connect fingertips ONLY when exactly two distinct-labelled hands are visible
+    const left = hands_.find(h => h.label === 'Left');
+    const right = hands_.find(h => h.label === 'Right');
+    if(left && right){
+      drawCradleStrings(left, right);
+    } else if(hands_.length === 2){
+      // labels ambiguous but two hands present — still make the rig work
+      drawCradleStrings(hands_[0], hands_[1]);
+    }
+  } else {
+    touchState = {};
+  }
+
+  updateAndDrawParticles();
+  drawFrameGlowOverlay();
+}
+
+function drawIdleGrid(){
+  push();
+  stroke(23,247,224,25);
+  strokeWeight(1);
+  const step = 40;
+  for(let x=0;x<width;x+=step) line(x,0,x,height);
+  for(let y=0;y<height;y+=step) line(0,y,width,y);
+  pop();
+}
+
+function drawVideoBackground(){
+  push();
+  translate(width, 0);
+  scale(-1,1);
+  if(videoEl.readyState >= 2){
+    image(videoEl, 0, 0, width, height);
+  }
+  pop();
+  // dark neon tint over the video for the futuristic look
+  noStroke();
+  fill(3,6,12,110);
+  rect(0,0,width,height);
+}
+
+function drawHandSkeleton(pts){
+  const ctx = drawingContext;
+
+  // bones
+  ctx.save();
+  ctx.shadowBlur = 8;
+  ctx.shadowColor = 'rgba(23,247,224,0.8)';
+  ctx.strokeStyle = 'rgba(120,230,255,0.55)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  for(const [a,b] of HAND_CONNECTIONS){
+    ctx.moveTo(pts[a].x, pts[a].y);
+    ctx.lineTo(pts[b].x, pts[b].y);
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  // joints
+  for(let i=0;i<pts.length;i++){
+    const isTip = FINGERTIPS.includes(i);
+    const fingerIdx = Math.max(0, Math.ceil(i/4)-1);
+    const col = FINGER_COLOR[FINGER_NAMES[fingerIdx]] || [23,247,224];
+    const r = isTip ? 5.5 : 2.6;
+
+    ctx.save();
+    ctx.shadowBlur = isTip ? 20 : 10;
+    ctx.shadowColor = `rgb(${col[0]},${col[1]},${col[2]})`;
+    ctx.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},${isTip ? 0.95 : 0.8})`;
+    ctx.beginPath();
+    ctx.arc(pts[i].x, pts[i].y, r, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// distance range used to map hand separation -> laser tension look
+const NEAR_D = 60;     // px: touching / slack
+const FAR_D = 700;     // px: fully stretched
+
+function drawCradleStrings(handA, handB){
+  const ctx = drawingContext;
+
+  for(let f=0; f<FINGERTIPS.length; f++){
+    const a = handA.pts[FINGERTIPS[f]];
+    const b = handB.pts[FINGERTIPS[f]];
+    const d = dist2(a,b);
+    const t = constrain(map(d, NEAR_D, FAR_D, 0, 1), 0, 1);
+
+    // relaxed (close) = cool cyan/magenta, stretched (far) = hot yellow-white
+    const cool = FINGER_COLOR[FINGER_NAMES[f]];
+    const hot = [255, 250, 200];
+    const col = lerpColor3(cool, hot, t);
+
+    // thickness: taut strings read thinner; slack strings read thicker & glowier
+    const baseW = lerp(5.5, 1.4, t);
+    const glow = lerp(14, 34, t);
+
+    // slight elastic jitter so strings feel alive
+    const jitter = (1-t) * 1.5 * Math.sin(frameCount*0.2 + f*10);
+    const mx = (a.x+b.x)/2 + jitter;
+    const my = (a.y+b.y)/2 + jitter;
+
+    ctx.save();
+    ctx.shadowBlur = glow;
+    ctx.shadowColor = `rgba(${col[0]},${col[1]},${col[2]},0.95)`;
+    ctx.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},0.9)`;
+    ctx.lineWidth = baseW;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.quadraticCurveTo(mx, my, b.x, b.y);
+    ctx.stroke();
+
+    // hot white core for a laser-beam look
+    ctx.shadowBlur = glow*0.5;
+    ctx.strokeStyle = `rgba(255,255,255,${0.55 + 0.35*(1-t)})`;
+    ctx.lineWidth = Math.max(baseW*0.35, 0.6);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.quadraticCurveTo(mx, my, b.x, b.y);
+    ctx.stroke();
+    ctx.restore();
+
+    // touch detection -> particle burst
+    const key = f;
+    const touching = d < NEAR_D * 0.7;
+    if(touching && !touchState[key]){
+      spawnBurst((a.x+b.x)/2, (a.y+b.y)/2, [255,255,255]);
+      spawnBurst((a.x+b.x)/2, (a.y+b.y)/2, cool);
+      touchState[key] = true;
+    } else if(!touching && d > NEAR_D * 1.1){
+      touchState[key] = false;
+    }
+  }
+}
+
+function updateAndDrawParticles(){
+  const ctx = drawingContext;
+  ctx.save();
+  for(let i=particles.length-1;i>=0;i--){
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy;
+    p.vx *= 0.94; p.vy *= 0.94;
+    p.life -= p.decay;
+    if(p.life <= 0){ particles.splice(i,1); continue; }
+
+    ctx.globalAlpha = Math.max(p.life, 0);
+    ctx.shadowBlur = 16;
+    ctx.shadowColor = `rgb(${p.color[0]},${p.color[1]},${p.color[2]})`;
+    ctx.fillStyle = `rgb(${p.color[0]},${p.color[1]},${p.color[2]})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  if(particles.length > 900){
+    particles.splice(0, particles.length - 900);
+  }
+}
+
+function drawFrameGlowOverlay(){
+  // subtle chromatic edge glow so the whole frame feels like a lit rig
+  const ctx = drawingContext;
+  ctx.save();
+  const g = ctx.createRadialGradient(width/2,height/2, height*0.35, width/2,height/2, height*0.75);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(3,4,7,0.55)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,width,height);
+  ctx.restore();
+}
+</script>
+</body>
+</html>
