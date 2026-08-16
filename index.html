@@ -617,303 +617,1055 @@
   <div class="corner br"></div>
 
   <script>
-  // ==============================
-  // SUMIT MAURYA // AI VISION CORE
-  // ==============================
+/* =====================================================
+   SUMIT MAURYA // AI HAND + GESTURE SYSTEM
+   ===================================================== */
 
-  const video = document.getElementById("video");
-  const canvas = document.getElementById("canvas");
-  const ctx = canvas.getContext("2d");
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
 
-  const statusDot = document.getElementById("statusDot");
-  const statusText = document.getElementById("statusText");
+const statusDot = document.getElementById("statusDot");
+const statusText = document.getElementById("statusText");
 
-  const leftHand = document.getElementById("leftHand");
-  const rightHand = document.getElementById("rightHand");
-  const landmarksText = document.getElementById("landmarks");
-  const fpsText = document.getElementById("fps");
+const leftHandEl = document.getElementById("leftHand");
+const rightHandEl = document.getElementById("rightHand");
+const landmarksEl = document.getElementById("landmarks");
+const fpsEl = document.getElementById("fps");
 
-  const terminalText = document.getElementById("terminalText");
-  const voiceBtn = document.getElementById("voiceBtn");
+const terminalText = document.getElementById("terminalText");
+const voiceBtn = document.getElementById("voiceBtn");
 
-  // ------------------------------
-  // CANVAS
-  // ------------------------------
+/* =====================================================
+   SETTINGS
+   ===================================================== */
 
-  function resizeCanvas() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+const CYAN = "#00fff7";
+const GREEN = "#00ff88";
 
-    canvas.width = window.innerWidth * dpr;
-    canvas.height = window.innerHeight * dpr;
+let lastFrameTime = performance.now();
+let frameCounter = 0;
 
-    canvas.style.width = window.innerWidth + "px";
-    canvas.style.height = window.innerHeight + "px";
+let drawing = false;
+let lastDrawPoint = null;
 
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
+let hudMinimized = false;
 
-  window.addEventListener("resize", resizeCanvas);
-  resizeCanvas();
+let fistStart = 0;
+let fistActionDone = false;
 
-  // ------------------------------
-  // TERMINAL
-  // ------------------------------
+let palmStart = 0;
+let palmActionDone = false;
 
-  const terminalMessages = [
-    "Initializing neural vision...",
-    "Loading hand landmark network...",
-    "Camera stream detected...",
-    "Waiting for hand landmarks...",
-    "AI vision core ready...",
-    "Tracking module online..."
-  ];
+let currentGesture = "NONE";
 
-  let terminalIndex = 0;
 
-  function terminalMessage(text) {
-    terminalText.textContent = "> " + text;
-  }
+/* =====================================================
+   CANVAS
+   ===================================================== */
 
-  setInterval(() => {
-    terminalMessage(
-      terminalMessages[terminalIndex]
+function resizeCanvas() {
+
+  const dpr =
+    Math.min(window.devicePixelRatio || 1, 2);
+
+  canvas.width =
+    window.innerWidth * dpr;
+
+  canvas.height =
+    window.innerHeight * dpr;
+
+  canvas.style.width =
+    window.innerWidth + "px";
+
+  canvas.style.height =
+    window.innerHeight + "px";
+
+  ctx.setTransform(
+    dpr,
+    0,
+    0,
+    dpr,
+    0,
+    0
+  );
+}
+
+window.addEventListener(
+  "resize",
+  resizeCanvas
+);
+
+resizeCanvas();
+
+
+/* =====================================================
+   AIR DRAWING CANVAS
+   ===================================================== */
+
+const drawCanvas =
+  document.createElement("canvas");
+
+drawCanvas.style.position = "fixed";
+drawCanvas.style.left = "0";
+drawCanvas.style.top = "0";
+drawCanvas.style.width = "100%";
+drawCanvas.style.height = "100%";
+drawCanvas.style.zIndex = "6";
+drawCanvas.style.pointerEvents = "none";
+
+document.body.appendChild(drawCanvas);
+
+const drawCtx =
+  drawCanvas.getContext("2d");
+
+function resizeDrawCanvas() {
+
+  const dpr =
+    Math.min(window.devicePixelRatio || 1, 2);
+
+  drawCanvas.width =
+    window.innerWidth * dpr;
+
+  drawCanvas.height =
+    window.innerHeight * dpr;
+
+  drawCtx.setTransform(
+    dpr,
+    0,
+    0,
+    dpr,
+    0,
+    0
+  );
+}
+
+window.addEventListener(
+  "resize",
+  resizeDrawCanvas
+);
+
+resizeDrawCanvas();
+
+
+/* =====================================================
+   TERMINAL
+   ===================================================== */
+
+function terminalMessage(message) {
+
+  if (!terminalText) return;
+
+  terminalText.textContent =
+    "> " + message;
+}
+
+
+/* =====================================================
+   MEDIAPIPE HANDS
+   ===================================================== */
+
+const hands = new Hands({
+
+  locateFile: (file) => {
+    return (
+      "https://cdn.jsdelivr.net/npm/" +
+      "@mediapipe/hands/" +
+      file
     );
-
-    terminalIndex =
-      (terminalIndex + 1) %
-      terminalMessages.length;
-
-  }, 2200);
-
-  // ------------------------------
-  // MEDIAPIPE HANDS
-  // ------------------------------
-
-  const hands = new Hands({
-    locateFile: (file) =>
-      `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-  });
-
-  hands.setOptions({
-    maxNumHands: 2,
-    modelComplexity: 1,
-    minDetectionConfidence: 0.65,
-    minTrackingConfidence: 0.65
-  });
-
-  // ------------------------------
-  // HAND CONNECTIONS
-  // ------------------------------
-
-  const connections = [
-    [0, 1],
-    [1, 2],
-    [2, 3],
-    [3, 4],
-
-    [0, 5],
-    [5, 6],
-    [6, 7],
-    [7, 8],
-
-    [0, 9],
-    [9, 10],
-    [10, 11],
-    [11, 12],
-
-    [0, 13],
-    [13, 14],
-    [14, 15],
-    [15, 16],
-
-    [0, 17],
-    [17, 18],
-    [18, 19],
-    [19, 20],
-
-    [5, 9],
-    [9, 13],
-    [13, 17]
-  ];
-
-  // ------------------------------
-  // COLORS
-  // ------------------------------
-
-  const CYAN = "#00fff7";
-  const GREEN = "#00ff88";
-
-  // ------------------------------
-  // CONVERT POINT
-  // ------------------------------
-
-  function screenPoint(point) {
-    return {
-      x: (1 - point.x) * window.innerWidth,
-      y: point.y * window.innerHeight
-    };
   }
 
-  // ------------------------------
-  // DRAW CONNECTION
-  // ------------------------------
+});
 
-  function drawConnection(a, b, color) {
+hands.setOptions({
 
-    const p1 = screenPoint(a);
-    const p2 = screenPoint(b);
+  maxNumHands: 2,
 
-    ctx.save();
+  modelComplexity: 1,
 
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
+  minDetectionConfidence: 0.65,
 
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 18;
+  minTrackingConfidence: 0.65
 
-    ctx.beginPath();
+});
 
-    ctx.moveTo(p1.x, p1.y);
-    ctx.lineTo(p2.x, p2.y);
 
-    ctx.stroke();
+/* =====================================================
+   HAND CONNECTIONS
+   ===================================================== */
 
-    // Bright core
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = "#ffffff";
-    ctx.globalAlpha = 0.65;
-    ctx.lineWidth = 0.8;
+const connections = [
 
-    ctx.beginPath();
+  [0, 1],
+  [1, 2],
+  [2, 3],
+  [3, 4],
 
-    ctx.moveTo(p1.x, p1.y);
-    ctx.lineTo(p2.x, p2.y);
+  [0, 5],
+  [5, 6],
+  [6, 7],
+  [7, 8],
 
-    ctx.stroke();
+  [0, 9],
+  [9, 10],
+  [10, 11],
+  [11, 12],
 
-    ctx.restore();
-  }
+  [0, 13],
+  [13, 14],
+  [14, 15],
+  [15, 16],
 
-  // ------------------------------
-  // DRAW LANDMARK
-  // ------------------------------
+  [0, 17],
+  [17, 18],
+  [18, 19],
+  [19, 20],
 
-  function drawLandmark(point, color, index) {
+  [5, 9],
+  [9, 13],
+  [13, 17]
 
-    const p = screenPoint(point);
+];
 
-    ctx.save();
 
-    ctx.fillStyle = color;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 20;
+/* =====================================================
+   SCREEN POSITION
+   ===================================================== */
 
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-    ctx.fill();
+function screenPoint(point) {
 
-    ctx.shadowBlur = 0;
+  return {
 
-    ctx.fillStyle = "#001416";
+    x:
+      (1 - point.x) *
+      window.innerWidth,
 
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-    ctx.fill();
+    y:
+      point.y *
+      window.innerHeight
 
-    ctx.fillStyle = "#ffffff";
+  };
+}
 
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 1.3, 0, Math.PI * 2);
-    ctx.fill();
 
-    // Selected landmark numbers
-    if ([0, 4, 8, 12, 16, 20].includes(index)) {
+/* =====================================================
+   DRAW NEON CONNECTION
+   ===================================================== */
 
-      ctx.font = "9px monospace";
-      ctx.fillStyle = color;
+function drawConnection(
+  a,
+  b,
+  color
+) {
 
-      ctx.fillText(
-        index,
-        p.x + 9,
-        p.y - 7
-      );
-    }
+  const p1 =
+    screenPoint(a);
 
-    ctx.restore();
-  }
+  const p2 =
+    screenPoint(b);
 
-  // ------------------------------
-  // BOUNDING BOX
-  // ------------------------------
+  ctx.save();
 
-  function drawBox(landmarks, color, label) {
+  ctx.strokeStyle = color;
 
-    let minX = 1;
-    let minY = 1;
-    let maxX = 0;
-    let maxY = 0;
+  ctx.lineWidth = 3;
 
-    landmarks.forEach(point => {
+  ctx.shadowColor = color;
 
-      minX = Math.min(minX, point.x);
-      minY = Math.min(minY, point.y);
+  ctx.shadowBlur = 18;
 
-      maxX = Math.max(maxX, point.x);
-      maxY = Math.max(maxY, point.y);
-    });
+  ctx.beginPath();
 
-    const pad = 0.025;
+  ctx.moveTo(
+    p1.x,
+    p1.y
+  );
 
-    minX = Math.max(0, minX - pad);
-    minY = Math.max(0, minY - pad);
+  ctx.lineTo(
+    p2.x,
+    p2.y
+  );
 
-    maxX = Math.min(1, maxX + pad);
-    maxY = Math.min(1, maxY + pad);
+  ctx.stroke();
 
-    const x =
-      (1 - maxX) * window.innerWidth;
+  ctx.shadowBlur = 0;
 
-    const y =
-      minY * window.innerHeight;
+  ctx.strokeStyle = "#ffffff";
 
-    const width =
-      (maxX - minX) * window.innerWidth;
+  ctx.globalAlpha = 0.65;
 
-    const height =
-      (maxY - minY) * window.innerHeight;
+  ctx.lineWidth = 0.8;
 
-    ctx.save();
+  ctx.beginPath();
 
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
+  ctx.moveTo(
+    p1.x,
+    p1.y
+  );
 
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 15;
+  ctx.lineTo(
+    p2.x,
+    p2.y
+  );
 
-    ctx.strokeRect(
-      x,
-      y,
-      width,
-      height
-    );
+  ctx.stroke();
 
-    ctx.font = "bold 11px monospace";
+  ctx.restore();
+}
+
+
+/* =====================================================
+   DRAW LANDMARK
+   ===================================================== */
+
+function drawLandmark(
+  point,
+  color,
+  index
+) {
+
+  const p =
+    screenPoint(point);
+
+  ctx.save();
+
+  ctx.fillStyle = color;
+
+  ctx.shadowColor = color;
+
+  ctx.shadowBlur = 20;
+
+  ctx.beginPath();
+
+  ctx.arc(
+    p.x,
+    p.y,
+    6,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = "#001416";
+
+  ctx.beginPath();
+
+  ctx.arc(
+    p.x,
+    p.y,
+    3,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fill();
+
+  ctx.fillStyle = "#ffffff";
+
+  ctx.beginPath();
+
+  ctx.arc(
+    p.x,
+    p.y,
+    1.3,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fill();
+
+  if (
+    index === 0 ||
+    index === 4 ||
+    index === 8 ||
+    index === 12 ||
+    index === 16 ||
+    index === 20
+  ) {
+
+    ctx.font =
+      "9px monospace";
+
     ctx.fillStyle = color;
 
     ctx.fillText(
-      label,
-      x,
-      Math.max(15, y - 7)
+      String(index),
+      p.x + 9,
+      p.y - 7
     );
-
-    ctx.restore();
   }
 
-  // ------------------------------
-  // HAND RESULTS
-  // ------------------------------
+  ctx.restore();
+}
 
-  hands.onResults(results => {
+
+/* =====================================================
+   BOUNDING BOX
+   ===================================================== */
+
+function drawBoundingBox(
+  landmarks,
+  color,
+  label
+) {
+
+  let minX = 1;
+  let minY = 1;
+  let maxX = 0;
+  let maxY = 0;
+
+  landmarks.forEach(point => {
+
+    minX =
+      Math.min(minX, point.x);
+
+    minY =
+      Math.min(minY, point.y);
+
+    maxX =
+      Math.max(maxX, point.x);
+
+    maxY =
+      Math.max(maxY, point.y);
+
+  });
+
+  const padding = 0.025;
+
+  minX =
+    Math.max(
+      0,
+      minX - padding
+    );
+
+  minY =
+    Math.max(
+      0,
+      minY - padding
+    );
+
+  maxX =
+    Math.min(
+      1,
+      maxX + padding
+    );
+
+  maxY =
+    Math.min(
+      1,
+      maxY + padding
+    );
+
+  const x =
+    (1 - maxX) *
+    window.innerWidth;
+
+  const y =
+    minY *
+    window.innerHeight;
+
+  const width =
+    (maxX - minX) *
+    window.innerWidth;
+
+  const height =
+    (maxY - minY) *
+    window.innerHeight;
+
+  ctx.save();
+
+  ctx.strokeStyle = color;
+
+  ctx.lineWidth = 1.5;
+
+  ctx.shadowColor = color;
+
+  ctx.shadowBlur = 15;
+
+  ctx.strokeRect(
+    x,
+    y,
+    width,
+    height
+  );
+
+  ctx.font =
+    "bold 10px monospace";
+
+  ctx.fillStyle = color;
+
+  ctx.fillText(
+    label,
+    x,
+    Math.max(15, y - 7)
+  );
+
+  ctx.restore();
+}
+
+
+/* =====================================================
+   DISTANCE
+   ===================================================== */
+
+function distance(a, b) {
+
+  const dx =
+    a.x - b.x;
+
+  const dy =
+    a.y - b.y;
+
+  return Math.sqrt(
+    dx * dx + dy * dy
+  );
+}
+
+
+/* =====================================================
+   FINGER STATES
+   ===================================================== */
+
+function getFingerStates(hand) {
+
+  return {
+
+    index:
+      hand[8].y <
+      hand[6].y,
+
+    middle:
+      hand[12].y <
+      hand[10].y,
+
+    ring:
+      hand[16].y <
+      hand[14].y,
+
+    pinky:
+      hand[20].y <
+      hand[18].y
+
+  };
+}
+
+
+/* =====================================================
+   PINCH
+   ===================================================== */
+
+function isPinching(hand) {
+
+  const thumb =
+    hand[4];
+
+  const index =
+    hand[8];
+
+  return (
+    distance(
+      thumb,
+      index
+    ) < 0.055
+  );
+}
+
+
+/* =====================================================
+   OPEN PALM
+   ===================================================== */
+
+function isOpenPalm(hand) {
+
+  const f =
+    getFingerStates(hand);
+
+  return (
+    f.index &&
+    f.middle &&
+    f.ring &&
+    f.pinky
+  );
+}
+
+
+/* =====================================================
+   FIST
+   ===================================================== */
+
+function isFist(hand) {
+
+  const f =
+    getFingerStates(hand);
+
+  return (
+    !f.index &&
+    !f.middle &&
+    !f.ring &&
+    !f.pinky
+  );
+}
+
+
+/* =====================================================
+   INDEX ONLY
+   ===================================================== */
+
+function isIndexOnly(hand) {
+
+  const f =
+    getFingerStates(hand);
+
+  return (
+    f.index &&
+    !f.middle &&
+    !f.ring &&
+    !f.pinky
+  );
+}
+
+
+/* =====================================================
+   TWO FINGER
+   ===================================================== */
+
+function isTwoFinger(hand) {
+
+  const f =
+    getFingerStates(hand);
+
+  return (
+    f.index &&
+    f.middle &&
+    !f.ring &&
+    !f.pinky
+  );
+}
+
+
+/* =====================================================
+   AIR DRAW
+   ===================================================== */
+
+function drawAirPoint(point) {
+
+  if (!lastDrawPoint) {
+
+    lastDrawPoint =
+      point;
+
+    return;
+  }
+
+  const smoothing = 0.35;
+
+  const smoothPoint = {
+
+    x:
+      lastDrawPoint.x +
+      (point.x -
+        lastDrawPoint.x) *
+      smoothing,
+
+    y:
+      lastDrawPoint.y +
+      (point.y -
+        lastDrawPoint.y) *
+      smoothing
+
+  };
+
+  drawCtx.save();
+
+  drawCtx.strokeStyle =
+    CYAN;
+
+  drawCtx.lineWidth =
+    4;
+
+  drawCtx.lineCap =
+    "round";
+
+  drawCtx.lineJoin =
+    "round";
+
+  drawCtx.shadowColor =
+    CYAN;
+
+  drawCtx.shadowBlur =
+    22;
+
+  drawCtx.beginPath();
+
+  drawCtx.moveTo(
+    lastDrawPoint.x,
+    lastDrawPoint.y
+  );
+
+  drawCtx.lineTo(
+    smoothPoint.x,
+    smoothPoint.y
+  );
+
+  drawCtx.stroke();
+
+  drawCtx.restore();
+
+  lastDrawPoint =
+    smoothPoint;
+}
+
+
+/* =====================================================
+   CLEAR DRAWING
+   ===================================================== */
+
+function clearDrawing() {
+
+  drawCtx.clearRect(
+    0,
+    0,
+    window.innerWidth,
+    window.innerHeight
+  );
+
+  lastDrawPoint = null;
+
+  terminalMessage(
+    "AIR DRAWING CLEARED"
+  );
+}
+
+
+/* =====================================================
+   HUD CONTROL
+   ===================================================== */
+
+function setHUDMinimized(
+  minimized
+) {
+
+  const panel =
+    document.querySelector(".panel");
+
+  const portfolio =
+    document.querySelector(".portfolio");
+
+  const terminal =
+    document.querySelector(".terminal");
+
+  if (
+    !panel ||
+    !portfolio ||
+    !terminal
+  ) {
+    return;
+  }
+
+  hudMinimized =
+    minimized;
+
+  const opacity =
+    minimized ? "0.08" : "1";
+
+  const scale =
+    minimized
+      ? "scale(.75)"
+      : "scale(1)";
+
+  panel.style.transition =
+    "all .35s ease";
+
+  portfolio.style.transition =
+    "all .35s ease";
+
+  terminal.style.transition =
+    "all .35s ease";
+
+  panel.style.opacity =
+    opacity;
+
+  portfolio.style.opacity =
+    opacity;
+
+  terminal.style.opacity =
+    opacity;
+
+  panel.style.transform =
+    scale;
+
+  portfolio.style.transform =
+    scale;
+
+  terminal.style.transform =
+    scale;
+
+  terminalMessage(
+    minimized
+      ? "HUD MINIMIZED"
+      : "HUD MAXIMIZED"
+  );
+}
+
+
+/* =====================================================
+   GESTURE PROCESSOR
+   ===================================================== */
+
+function processGesture(
+  hand
+) {
+
+  if (
+    !hand ||
+    hand.length < 21
+  ) {
+    return;
+  }
+
+
+  /* ---------------------------------
+     PINCH
+     --------------------------------- */
+
+  if (isPinching(hand)) {
+
+    drawing = false;
+
+    lastDrawPoint = null;
+
+    currentGesture =
+      "PINCH / SELECT";
+
+    fistStart = 0;
+
+    palmStart = 0;
+
+    showGesture(
+      currentGesture
+    );
+
+    return;
+  }
+
+
+  /* ---------------------------------
+     INDEX = AIR WRITE
+     --------------------------------- */
+
+  if (isIndexOnly(hand)) {
+
+    drawing = true;
+
+    fistStart = 0;
+
+    palmStart = 0;
+
+    const point =
+      screenPoint(
+        hand[8]
+      );
+
+    drawAirPoint(point);
+
+    currentGesture =
+      "AIR WRITING";
+
+    showGesture(
+      currentGesture
+    );
+
+    return;
+  }
+
+
+  /* ---------------------------------
+     TWO FINGERS
+     --------------------------------- */
+
+  if (isTwoFinger(hand)) {
+
+    drawing = false;
+
+    lastDrawPoint = null;
+
+    fistStart = 0;
+
+    palmStart = 0;
+
+    currentGesture =
+      "TWO FINGER CURSOR";
+
+    showGesture(
+      currentGesture
+    );
+
+    return;
+  }
+
+
+  /* ---------------------------------
+     OPEN PALM
+     --------------------------------- */
+
+  if (isOpenPalm(hand)) {
+
+    drawing = false;
+
+    lastDrawPoint = null;
+
+    fistStart = 0;
+
+    if (palmStart === 0) {
+
+      palmStart =
+        performance.now();
+
+      palmActionDone =
+        false;
+    }
+
+    const held =
+      performance.now() -
+      palmStart;
+
+    if (
+      held > 700 &&
+      !palmActionDone
+    ) {
+
+      setHUDMinimized(false);
+
+      palmActionDone =
+        true;
+    }
+
+    currentGesture =
+      "OPEN PALM";
+
+    showGesture(
+      currentGesture
+    );
+
+    return;
+  }
+
+
+  /* ---------------------------------
+     FIST
+     --------------------------------- */
+
+  if (isFist(hand)) {
+
+    drawing = false;
+
+    lastDrawPoint = null;
+
+    palmStart = 0;
+
+    palmActionDone = false;
+
+    if (fistStart === 0) {
+
+      fistStart =
+        performance.now();
+
+      fistActionDone =
+        false;
+    }
+
+    const held =
+      performance.now() -
+      fistStart;
+
+    /*
+       0.8 sec = minimize HUD
+       2.2 sec = clear drawing
+    */
+
+    if (
+      held > 800 &&
+      !fistActionDone
+    ) {
+
+      setHUDMinimized(true);
+
+      fistActionDone =
+        true;
+    }
+
+    if (
+      held > 2200 &&
+      fistActionDone
+    ) {
+
+      if (
+        currentGesture !==
+        "CLEARING"
+      ) {
+
+        clearDrawing();
+
+        currentGesture =
+          "CLEARING";
+      }
+    }
+
+    showGesture(
+      "FIST / HOLD"
+    );
+
+    return;
+  }
+
+
+  /* ---------------------------------
+     NOTHING
+     --------------------------------- */
+
+  drawing = false;
+
+  lastDrawPoint = null;
+
+  fistStart = 0;
+
+  palmStart = 0;
+
+  fistActionDone = false;
+  palmActionDone = false;
+
+  currentGesture =
+    "NONE";
+}
+
+
+/* =====================================================
+   GESTURE HUD
+   ===================================================== */
+
+function showGesture(
+  gesture
+) {
+
+  if (!terminalText) {
+    return;
+  }
+
+  terminalText.textContent =
+    "> GESTURE :: " +
+    gesture;
+}
+
+
+/* =====================================================
+   MEDIAPIPE RESULTS
+   ===================================================== */
+
+hands.onResults(
+  results => {
 
     ctx.clearRect(
       0,
@@ -928,433 +1680,344 @@
     const handedness =
       results.multiHandedness || [];
 
-    let leftDetected = false;
-    let rightDetected = false;
+    let leftDetected =
+      false;
 
-    let totalLandmarks = 0;
+    let rightDetected =
+      false;
 
-    detected.forEach((landmarks, i) => {
+    let totalLandmarks =
+      0;
 
-      totalLandmarks += landmarks.length;
 
-      const mediaPipeLabel =
-        handedness[i]?.label || "Unknown";
+    detected.forEach(
+      (landmarks, index) => {
 
-      /*
-       * Because the displayed camera is mirrored,
-       * swap the visual labels.
-       */
+        totalLandmarks +=
+          landmarks.length;
 
-      const visualLabel =
-        mediaPipeLabel === "Left"
-          ? "RIGHT"
-          : "LEFT";
 
-      const color =
-        visualLabel === "LEFT"
-          ? CYAN
-          : GREEN;
+        /*
+         * Gesture engine
+         */
 
-      if (visualLabel === "LEFT") {
-        leftDetected = true;
-      }
-
-      if (visualLabel === "RIGHT") {
-        rightDetected = true;
-      }
-
-      // Skeleton
-      connections.forEach(([a, b]) => {
-
-        if (landmarks[a] && landmarks[b]) {
-          drawConnection(
-            landmarks[a],
-            landmarks[b],
-            color
-          );
-        }
-
-      });
-
-      // Landmarks
-      landmarks.forEach((point, index) => {
-
-        drawLandmark(
-          point,
-          color,
-          index
+        processGesture(
+          landmarks
         );
 
-      });
 
-      // Bounding box
-      drawBox(
-        landmarks,
-        color,
-        visualLabel + "_HAND // TRACKED"
-      );
-    });
+        /*
+         * MediaPipe hand label
+         */
 
-    // ------------------------------
-    // HUD
-    // ------------------------------
+        const mediaLabel =
+          handedness[index]?.label ||
+          "Unknown";
 
-    leftHand.textContent =
+
+        /*
+         * Because video is mirrored,
+         * visual label is swapped.
+         */
+
+        const visualLabel =
+          mediaLabel === "Left"
+            ? "RIGHT"
+            : "LEFT";
+
+
+        const color =
+          visualLabel === "LEFT"
+            ? CYAN
+            : GREEN;
+
+
+        if (
+          visualLabel === "LEFT"
+        ) {
+
+          leftDetected =
+            true;
+        }
+
+
+        if (
+          visualLabel === "RIGHT"
+        ) {
+
+          rightDetected =
+            true;
+        }
+
+
+        /*
+         * Skeleton
+         */
+
+        connections.forEach(
+          ([a, b]) => {
+
+            if (
+              landmarks[a] &&
+              landmarks[b]
+            ) {
+
+              drawConnection(
+                landmarks[a],
+                landmarks[b],
+                color
+              );
+            }
+
+          }
+        );
+
+
+        /*
+         * Landmarks
+         */
+
+        landmarks.forEach(
+          (point, landmarkIndex) => {
+
+            drawLandmark(
+              point,
+              color,
+              landmarkIndex
+            );
+
+          }
+        );
+
+
+        /*
+         * Bounding box
+         */
+
+        drawBoundingBox(
+          landmarks,
+          color,
+          visualLabel +
+          "_HAND // TRACKED"
+        );
+
+      }
+    );
+
+
+    /* ---------------------------------
+       UPDATE HUD
+       --------------------------------- */
+
+    leftHandEl.textContent =
       leftDetected
         ? "DETECTED"
         : "--";
 
-    rightHand.textContent =
+    rightHandEl.textContent =
       rightDetected
         ? "DETECTED"
         : "--";
 
-    landmarksText.textContent =
+    landmarksEl.textContent =
       totalLandmarks;
 
-    if (detected.length > 0) {
 
-      statusDot.classList.add("online");
+    if (
+      detected.length > 0
+    ) {
+
+      statusDot.classList.add(
+        "online"
+      );
 
       statusText.textContent =
         "SYSTEM ONLINE // AI TRACKING";
 
-      terminalMessage(
-        detected.length === 2
-          ? "Two hand neural tracking active..."
-          : "Hand landmark tracking active..."
-      );
-
     } else {
 
-      statusDot.classList.remove("online");
+      statusDot.classList.remove(
+        "online"
+      );
 
       statusText.textContent =
         "SCANNING FOR HAND...";
 
     }
 
+
     updateFPS();
-  });
 
-  // ------------------------------
-  // FPS
-  // ------------------------------
-
-  let frameCount = 0;
-  let fpsTime = performance.now();
-
-  function updateFPS() {
-
-    frameCount++;
-
-    const now = performance.now();
-
-    if (now - fpsTime >= 1000) {
-
-      fpsText.textContent =
-        frameCount;
-
-      frameCount = 0;
-      fpsTime = now;
-    }
   }
+);
 
-  // ------------------------------
-  // CAMERA
-  // ------------------------------
 
-  async function startCamera() {
+/* =====================================================
+   FPS
+   ===================================================== */
 
-    try {
+function updateFPS() {
 
-      terminalMessage(
-        "Requesting camera permission..."
-      );
+  frameCounter++;
 
-      const stream =
-        await navigator.mediaDevices.getUserMedia({
+  const now =
+    performance.now();
+
+  if (
+    now - lastFrameTime >=
+    1000
+  ) {
+
+    fpsEl.textContent =
+      frameCounter;
+
+    frameCounter = 0;
+
+    lastFrameTime =
+      now;
+  }
+}
+
+
+/* =====================================================
+   CAMERA
+   ===================================================== */
+
+async function startCamera() {
+
+  try {
+
+    terminalMessage(
+      "REQUESTING CAMERA..."
+    );
+
+    const stream =
+      await navigator.mediaDevices
+        .getUserMedia({
+
           video: {
+
             facingMode: "user",
+
             width: {
               ideal: 1280
             },
+
             height: {
               ideal: 720
             }
+
           },
+
           audio: false
+
         });
 
-      video.srcObject = stream;
 
-      await video.play();
+    video.srcObject =
+      stream;
 
-      const camera = new Camera(
+    await video.play();
+
+
+    const camera =
+      new Camera(
         video,
         {
+
           width: 1280,
+
           height: 720,
 
-          onFrame: async () => {
+          onFrame:
+            async () => {
 
-            await hands.send({
-              image: video
-            });
+              await hands.send({
+                image: video
+              });
 
-          }
+            }
+
         }
       );
 
-      camera.start();
 
-      statusText.textContent =
-        "SYSTEM ONLINE // CAMERA READY";
+    camera.start();
 
-      terminalMessage(
-        "Neural vision system initialized."
-      );
 
-    } catch (error) {
+    statusText.textContent =
+      "SYSTEM ONLINE // CAMERA READY";
 
-      console.error(error);
-
-      statusDot.classList.remove("online");
-
-      statusText.textContent =
-        "CAMERA PERMISSION REQUIRED";
-
-      terminalMessage(
-        "Camera access was not granted."
-      );
-    }
-  }
-
-  // ------------------------------
-  // VOICE SYSTEM
-  // ------------------------------
-
-  const SpeechRecognition =
-    window.SpeechRecognition ||
-    window.webkitSpeechRecognition;
-
-  let recognition = null;
-  let listening = false;
-
-  function speak(text) {
-
-    if (!("speechSynthesis" in window)) {
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-
-    const utterance =
-      new SpeechSynthesisUtterance(text);
-
-    utterance.rate = 0.95;
-    utterance.pitch = 0.8;
-    utterance.volume = 1;
-
-    window.speechSynthesis.speak(
-      utterance
-    );
-  }
-
-  function handleVoiceCommand(command) {
-
-    const text =
-      command.toLowerCase().trim();
 
     terminalMessage(
-      "VOICE >> " + command
+      "NEURAL VISION INITIALIZED"
     );
 
-    if (
-      text.includes("portfolio") ||
-      text.includes("website one") ||
-      text.includes("website 1")
-    ) {
+  } catch (error) {
 
-      speak(
-        "Opening Sumit's portfolio."
-      );
-
-      window.open(
-        "https://rka205.github.io/Sumit/",
-        "_blank"
-      );
-
-      return;
-    }
-
-    if (
-      text.includes("project") ||
-      text.includes("website two") ||
-      text.includes("website 2")
-    ) {
-
-      speak(
-        "Opening Sumit's project website."
-      );
-
-      window.open(
-        "https://rka205.github.io/SK/",
-        "_blank"
-      );
-
-      return;
-    }
-
-    if (
-      text.includes("hello") ||
-      text.includes("hi")
-    ) {
-
-      speak(
-        "Hello Sumit. AI vision system is online."
-      );
-
-      return;
-    }
-
-    if (
-      text.includes("status") ||
-      text.includes("system")
-    ) {
-
-      speak(
-        detectedStatus()
-      );
-
-      return;
-    }
-
-    speak(
-      "Command received. I am ready."
+    console.error(
+      "Camera error:",
+      error
     );
-  }
 
-  function detectedStatus() {
-
-    const left =
-      leftHand.textContent === "DETECTED";
-
-    const right =
-      rightHand.textContent === "DETECTED";
-
-    if (left && right) {
-      return "Both hands are detected.";
-    }
-
-    if (left) {
-      return "Left hand is detected.";
-    }
-
-    if (right) {
-      return "Right hand is detected.";
-    }
-
-    return "No hand detected.";
-  }
-
-  if (SpeechRecognition) {
-
-    recognition =
-      new SpeechRecognition();
-
-    recognition.lang = "en-IN";
-
-    recognition.continuous = false;
-    recognition.interimResults = false;
-
-    recognition.onstart = () => {
-
-      listening = true;
-
-      voiceBtn.classList.add("active");
-
-      terminalMessage(
-        "Voice input listening..."
-      );
-    };
-
-    recognition.onresult = event => {
-
-      const command =
-        event.results[0][0].transcript;
-
-      handleVoiceCommand(command);
-    };
-
-    recognition.onerror = event => {
-
-      console.log(
-        "Voice error:",
-        event.error
-      );
-
-      terminalMessage(
-        "Voice input error: " +
-        event.error
-      );
-    };
-
-    recognition.onend = () => {
-
-      listening = false;
-
-      voiceBtn.classList.remove("active");
-    };
-
-  } else {
+    statusText.textContent =
+      "CAMERA PERMISSION REQUIRED";
 
     terminalMessage(
-      "Voice recognition unavailable in this browser."
+      "CAMERA ACCESS DENIED"
     );
+  }
+}
 
-    voiceBtn.disabled = true;
+
+/* =====================================================
+   VOICE AI
+   ===================================================== */
+
+const SpeechRecognition =
+  window.SpeechRecognition ||
+  window.webkitSpeechRecognition;
+
+let recognition = null;
+let listening = false;
+
+
+function speak(text) {
+
+  if (
+    !("speechSynthesis" in window)
+  ) {
+    return;
   }
 
-  voiceBtn.addEventListener(
-    "click",
-    () => {
+  window.speechSynthesis.cancel();
 
-      if (!recognition) {
-        return;
-      }
+  const utterance =
+    new SpeechSynthesisUtterance(
+      text
+    );
 
-      if (listening) {
-        recognition.stop();
-        return;
-      }
+  utterance.rate = 0.95;
 
-      try {
+  utterance.pitch = 0.8;
 
-        recognition.start();
+  utterance.volume = 1;
 
-      } catch (error) {
-
-        console.log(error);
-
-      }
-    }
+  window.speechSynthesis.speak(
+    utterance
   );
-
-  // ------------------------------
-  // START SYSTEM
-  // ------------------------------
-
-  startCamera();
-
-    </script>
+}
 
 
-  <!-- =================================================
-       PART 2:
-       यहां तुम्हारा पुराना Hand Tracking JavaScript
-       + नया Voice AI JavaScript आएगा.
-       ================================================= -->
+function getSystemStatus() {
 
-</body>
+  const left =
+    leftHandEl.textContent ===
+    "DETECTED";
+
+  const right =
+    rightHandEl.textContent ===
+    "DETECTED";
+    
+  </body>
 </html>
