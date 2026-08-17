@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>SUMIT MAURYA // AI HAND HUD</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020608;color:#00fff7;font-family:Consolas,Monaco,monospace}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;background:repeating-linear-gradient(0deg,rgba(0,255,247,.025) 0,rgba(0,255,247,.025) 1px,transparent 1px,transparent 4px)}
+#video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:.18;filter:contrast(1.2) brightness(.7)}
+#canvas,#airCanvas{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}
+#canvas{z-index:5}.panel,.terminal,.portfolio{position:fixed;z-index:20;background:rgba(0,15,18,.78);border:1px solid rgba(0,255,247,.55);box-shadow:0 0 25px rgba(0,255,247,.12);backdrop-filter:blur(8px)}
+.panel{top:18px;left:18px;width:310px;padding:16px}
+.title{font-size:20px;font-weight:800;letter-spacing:2px}.sub{font-size:10px;opacity:.7;margin:5px 0 14px}
+.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(0,255,247,.12);font-size:12px}
+.online{color:#00ff88!important}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#ff315c;margin-right:7px;box-shadow:0 0 8px currentColor}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+button{background:transparent;color:#00fff7;border:1px solid #00fff7;padding:8px 10px;font:inherit;font-size:11px;cursor:pointer}
+button:hover,button.active{background:#00fff7;color:#001416;box-shadow:0 0 18px #00fff7}
+.terminal{left:18px;bottom:18px;width:min(600px,calc(100% - 36px));padding:12px;font-size:12px}
+.portfolio{right:18px;top:18px;padding:14px;width:230px}
+.portfolio h3{margin:0 0 10px;font-size:13px}.portfolio a{display:block;color:#00fff7;text-decoration:none;border:1px solid rgba(0,255,247,.35);padding:8px;margin-top:7px;font-size:11px}.portfolio a:hover{background:#00fff7;color:#001416}
+#cursor{position:fixed;z-index:25;width:18px;height:18px;border:2px solid #00fff7;border-radius:50%;pointer-events:none;display:none;box-shadow:0 0 16px #00fff7}
+#help{position:fixed;right:18px;bottom:18px;z-index:21;font-size:10px;opacity:.7;line-height:1.6;text-align:right}
+.hidden{display:none!important}
+@media(max-width:700px){.panel{width:245px}.portfolio{top:auto;bottom:75px;width:190px}.title{font-size:16px}}
+</style>
+</head>
+<body>
+
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas"></canvas>
+<canvas id="airCanvas"></canvas>
+<div id="cursor"></div>
+
+<section class="panel" id="hud">
+  <div class="title">SUMIT MAURYA</div>
+  <div class="sub">TOUCHLESS AI VISION // HUD v1.0</div>
+  <div class="row"><span>SYSTEM</span><span id="status"><span class="dot"></span>SCANNING</span></div>
+  <div class="row"><span>LEFT HAND</span><span id="left">--</span></div>
+  <div class="row"><span>RIGHT HAND</span><span id="right">--</span></div>
+  <div class="row"><span>LANDMARKS</span><span id="landmarks">0</span></div>
+  <div class="row"><span>FPS</span><span id="fps">0</span></div>
+  <div class="row"><span>MODE</span><span id="mode">IDLE</span></div>
+  <div class="btns">
+    <button id="voiceBtn">VOICE</button>
+    <button id="clearBtn">CLEAR</button>
+    <button id="maxBtn">MAX</button>
+    <button id="minBtn">MIN</button>
+  </div>
+</section>
+
+<section class="portfolio">
+  <h3>NETWORK LINKS</h3>
+  <a href="https://rka205.github.io/Sumit/" target="_blank" rel="noopener">SUMIT PORTFOLIO ↗</a>
+  <a href="https://rka205.github.io/SK/" target="_blank" rel="noopener">SK PROJECT ↗</a>
+</section>
+
+<section class="terminal" id="terminal">&gt; INITIALIZING AI VISION...</section>
+<div id="help">
+☝ AIR WRITE &nbsp; 🤏 SELECT<br>
+✌ MOVE &nbsp; 🖐 MAX &nbsp; ✊ MIN/CLEAR<br>
+V = VOICE &nbsp; C = CLEAR &nbsp; P = PORTFOLIO
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+<script>
+"use strict";
+
+const video=document.getElementById("video");
+const canvas=document.getElementById("canvas");
+const airCanvas=document.getElementById("airCanvas");
+const ctx=canvas.getContext("2d");
+const actx=airCanvas.getContext("2d");
+const terminal=document.getElementById("terminal");
+const statusEl=document.getElementById("status");
+const leftEl=document.getElementById("left");
+const rightEl=document.getElementById("right");
+const landmarksEl=document.getElementById("landmarks");
+const fpsEl=document.getElementById("fps");
+const modeEl=document.getElementById("mode");
+const cursor=document.getElementById("cursor");
+const hud=document.getElementById("hud");
+
+let lastIndex=null,lastPinch=null;
+let writing=false;
+let fistStart=0,palmStart=0;
+let fpsCount=0,fpsTime=performance.now();
+let hudMinimized=false;
+let drawingHistory=[];
+
+function resize(){
+  const d=Math.min(devicePixelRatio||1,2);
+  [canvas,airCanvas].forEach(c=>{
+    c.width=innerWidth*d;c.height=innerHeight*d;
+    c.style.width=innerWidth+"px";c.style.height=innerHeight+"px";
+  });
+  ctx.setTransform(d,0,0,d,0,0);
+  actx.setTransform(d,0,0,d,0,0);
+}
+addEventListener("resize",resize); resize();
+
+function log(s){terminal.textContent="> "+s}
+function setMode(s){modeEl.textContent=s}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function fingers(h){
+  return {i:h[8].y<h[6].y,m:h[12].y<h[10].y,r:h[16].y<h[14].y,p:h[20].y<h[18].y};
+}
+function point(l){return{x:(1-l.x)*innerWidth,y:l.y*innerHeight}}
+function smooth(a,b,k=.3){return a?{x:a.x+(b.x-a.x)*k,y:a.y+(b.y-a.y)*k}:b}
+
+function clearAir(){
+  actx.clearRect(0,0,innerWidth,innerHeight);
+  lastIndex=null;
+  drawingHistory=[];
+  log("AIR CANVAS // CLEARED");
+}
+document.getElementById("clearBtn").onclick=clearAir;
+
+function hudState(min){
+  hudMinimized=min;
+  [hud].forEach(e=>{
+    e.style.opacity=min?".08":"1";
+    e.style.transform=min?"scale(.75)":"scale(1)";
+  });
+  setMode(min?"MINIMIZED":"MAXIMIZED");
+  log("HUD // "+(min?"MINIMIZED":"MAXIMIZED"));
+}
+document.getElementById("maxBtn").onclick=()=>hudState(false);
+document.getElementById("minBtn").onclick=()=>hudState(true);
+
+const hands=new Hands({locateFile:file=>"https://cdn.jsdelivr.net/npm/@mediapipe/hands/"+file});
+hands.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:.65,minTrackingConfidence:.65});
+
+const connections=[
+[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],
+[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],
+[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]
+];
+
+function drawHand(h,color,label){
+  const pts=h.map(point);
+  ctx.save();
+  ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.shadowColor=color;ctx.shadowBlur=14;
+  connections.forEach(([a,b])=>{
+    ctx.beginPath();ctx.moveTo(pts[a].x,pts[a].y);ctx.lineTo(pts[b].x,pts[b].y);ctx.stroke();
+  });
+  pts.forEach((p,i)=>{
+    ctx.fillStyle=color;ctx.beginPath();ctx.arc(p.x,p.y,4.5,0,Math.PI*2);ctx.fill();
+  });
+  const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);
+  const x=Math.min(...xs)-12,y=Math.min(...ys)-20,w=Math.max(...xs)-Math.min(...xs)+24,hgt=Math.max(...ys)-Math.min(...ys)+34;
+  ctx.shadowBlur=0;ctx.strokeRect(x,y,w,hgt);ctx.font="11px monospace";ctx.fillText(label,x,y-4);
+  ctx.restore();
+}
+
+function airWrite(p){
+  const q=smooth(lastIndex,p);
+  if(lastIndex){
+    actx.save();
+    actx.strokeStyle="#00fff7";actx.lineWidth=4;actx.lineCap="round";
+    actx.shadowColor="#00fff7";actx.shadowBlur=20;
+    actx.beginPath();actx.moveTo(lastIndex.x,lastIndex.y);actx.lineTo(q.x,q.y);actx.stroke();
+    actx.restore();
+  }
+  lastIndex=q;
+}
+
+function processGesture(h){
+  const f=fingers(h);
+  const isPinch=dist(h[4],h[8])<.075;
+  const indexOnly=f.i&&!f.m&&!f.r&&!f.p;
+  const two=f.i&&f.m&&!f.r&&!f.p;
+  const palm=f.i&&f.m&&f.r&&f.p;
+  const fist=!f.i&&!f.m&&!f.r&&!f.p;
+
+  if(indexOnly&&!isPinch){
+    setMode("AIR WRITING");
+    writing=true; fistStart=0;palmStart=0;
+    const p=point(h[8]);cursor.style.display="block";cursor.style.left=(p.x-9)+"px";cursor.style.top=(p.y-9)+"px";
+    airWrite(p); return;
+  }
+
+  if(isPinch){
+    setMode("PINCH SELECT");
+    writing=false;lastIndex=null;
+    const p=point(h[8]);cursor.style.display="block";cursor.style.left=(p.x-9)+"px";cursor.style.top=(p.y-9)+"px";
+    lastPinch=dist(h[4],h[8]);
+    return;
+  }
+
+  if(two){
+    setMode("TWO-FINGER NAV");
+    writing=false;lastIndex=null;
+    const p=point(h[8]);cursor.style.display="block";cursor.style.left=(p.x-9)+"px";cursor.style.top=(p.y-9)+"px";
+    return;
+  }
+
+  if(palm){
+    setMode("OPEN PALM");
+    writing=false;lastIndex=null;fistStart=0;
+    if(!palmStart)palmStart=performance.now();
+    if(performance.now()-palmStart>700&&!hudMinimized) hudState(false);
+    return;
+  }
+
+  if(fist){
+    setMode("FIST");
+    writing=false;lastIndex=null;palmStart=0;
+    if(!fistStart)fistStart=performance.now();
+    const held=performance.now()-fistStart;
+    if(held>800&&!hudMinimized)hudState(true);
+    if(held>2200){clearAir();fistStart=performance.now();}
+    return;
+  }
+
+  writing=false;lastIndex=null;fistStart=0;palmStart=0;cursor.style.display="none";setMode("IDLE");
+}
+
+hands.onResults(results=>{
+  ctx.clearRect(0,0,innerWidth,innerHeight);
+  const hs=results.multiHandLandmarks||[], labels=results.multiHandedness||[];
+  let L=false,R=false,total=0;
+  hs.forEach((h,i)=>{
+    total+=h.length;
+    const label=labels[i]?.label||"Unknown";
+    const visual=label==="Left"?"RIGHT":"LEFT";
+    if(visual==="LEFT")L=true;else if(visual==="RIGHT")R=true;
+    drawHand(h,visual==="LEFT"?"#00fff7":"#00ff88",visual+" // AI TRACKED");
+    processGesture(h);
+  });
+  leftEl.textContent=L?"DETECTED":"--";
+  rightEl.textContent=R?"DETECTED":"--";
+  landmarksEl.textContent=total;
+  statusEl.classList.toggle("online",hs.length>0);
+  statusEl.innerHTML='<span class="dot"></span>'+(hs.length?("AI ONLINE // "+hs.length+" HAND"+(hs.length>1?"S":"")):"SCANNING");
+  fpsCount++;const now=performance.now();
+  if(now-fpsTime>=1000){fpsEl.textContent=fpsCount;fpsCount=0;fpsTime=now}
+});
+
+async function start(){
+  try{
+    log("REQUESTING CAMERA...");
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:1280},height:{ideal:720}},audio:false});
+    video.srcObject=stream;await video.play();
+    const cam=new Camera(video,{width:1280,height:720,onFrame:async()=>{await hands.send({image:video})}});
+    cam.start();
+    log("AI HAND VISION // ONLINE");
+  }catch(e){
+    console.error(e);
+    log("CAMERA ERROR // ALLOW CAMERA ACCESS");
+    statusEl.innerHTML='<span class="dot"></span>CAMERA ERROR';
+  }
+}
+
+/* Voice */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let recognition=null;
+if(SR){
+  recognition=new SR();
+  recognition.lang="en-IN";
+  recognition.continuous=false;
+  recognition.onstart=()=>{document.getElementById("voiceBtn").classList.add("active");log("VOICE AI // LISTENING")};
+  recognition.onend=()=>document.getElementById("voiceBtn").classList.remove("active");
+  recognition.onresult=e=>voiceCommand(e.results[0][0].transcript.toLowerCase());
+}
+function speak(t){if(!("speechSynthesis"in window))return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang="en-IN";u.rate=.95;speechSynthesis.speak(u)}
+function voiceCommand(c){
+  log("VOICE :: "+c);
+  if(c.includes("portfolio")||c.includes("sumit")){open("https://rka205.github.io/Sumit/","_blank","noopener");speak("Opening Sumit Maurya portfolio");return}
+  if(c.includes("project")||c.includes("school")){open("https://rka205.github.io/SK/","_blank","noopener");speak("Opening project website");return}
+  if(c.includes("maximize")||c.includes("full")){hudState(false);speak("HUD maximized");return}
+  if(c.includes("minimize")){hudState(true);speak("HUD minimized");return}
+  if(c.includes("clear")||c.includes("erase")){clearAir();speak("Air canvas cleared");return}
+  if(c.includes("status")){speak("AI vision system is online");return}
+  if(c.includes("help")||c.includes("command")){speak("Say portfolio, project, maximize, minimize, clear, or status");log("VOICE COMMANDS READY");return}
+  log("COMMAND NOT RECOGNIZED");
+}
+document.getElementById("voiceBtn").onclick=()=>{
+  if(!recognition){log("VOICE API NOT SUPPORTED");return}
+  try{recognition.start()}catch(e){}
+};
+
+document.addEventListener("keydown",e=>{
+  const k=e.key.toLowerCase();
+  if(k==="v")document.getElementById("voiceBtn").click();
+  if(k==="c")clearAir();
+  if(k==="m")hudState(true);
+  if(k==="x")hudState(false);
+  if(k==="p")open("https://rka205.github.io/Sumit/","_blank","noopener");
+});
+
+start();
+</script>
+</body>
+</html>
